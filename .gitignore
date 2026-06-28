@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment variables (secrets)
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Transcripts (user data, large audio files)
+transcripts/
+
+# Feedback (user-specific learning data)
+posty_feedback.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kiro
+.kiro/

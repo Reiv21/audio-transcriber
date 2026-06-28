@@ -1,0 +1,10 @@
+# Słownik korekt nazw własnych
+# Format: błędna forma=poprawna forma (jedna reguła na linię)
+# Linie zaczynające się od # są ignorowane.
+# Korekta ignoruje wielkość liter i działa na całych słowach.
+#
+# Przykłady (odkomentuj i dostosuj do swoich nazwisk):
+# Spirka=Spyrka
+# Zandberg=Zandberg
+# Cymański=Czymański
+# Oficjalne Zero=OficjalneZero
