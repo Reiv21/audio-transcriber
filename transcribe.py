@@ -39,8 +39,7 @@ def transcribe_and_diarize(
     compute_type: str = "float16",
     min_speakers = None,
     max_speakers = None,
-    batch_size: int = 4,
-    initial_prompt: str = None
+    batch_size: int = 4
 ):
     """Główna funkcja transkrypcji i podziału na mówców za pomocą WhisperX."""
     print("[-] Ładowanie WhisperX...")
@@ -64,17 +63,7 @@ def transcribe_and_diarize(
 
     # Krok 2: Transkrypcja podstawowa (Whisper)
     print(f"[-] Krok 1/4: Transkrypcja Whisper (model: {model_name})...")
-    # initial_prompt podpowiada modelowi nazwy własne i kontekst (poprawia nazwiska)
-    asr_options = {}
-    if initial_prompt:
-        asr_options["initial_prompt"] = initial_prompt
-        print(f"[*] Używam podpowiedzi (initial_prompt) dla lepszego rozpoznawania nazw")
-    try:
-        model = whisperx.load_model(model_name, device, compute_type=compute_type,
-                                    asr_options=asr_options if asr_options else None)
-    except TypeError:
-        # Starsza wersja whisperx bez asr_options
-        model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    model = whisperx.load_model(model_name, device, compute_type=compute_type)
     result = model.transcribe(audio, batch_size=batch_size)
     
     # Usunięcie modelu transkrypcji w celu zwolnienia pamięci VRAM
@@ -120,94 +109,9 @@ def transcribe_and_diarize(
         diarized = False
 
     if diarized:
-        result = smooth_word_speakers(result)
         result = split_segments_by_speaker(result)
 
     return result, diarized
-
-def load_name_corrections(path):
-    """Wczytuje słownik korekt z pliku. Format: 'błędna forma=poprawna forma' per linia."""
-    corrections = {}
-    if path and os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                wrong, right = line.split("=", 1)
-                wrong = wrong.strip()
-                right = right.strip()
-                if wrong and right:
-                    corrections[wrong] = right
-    return corrections
-
-def apply_name_corrections(result, corrections):
-    """Stosuje słownik korekt nazw własnych do tekstu segmentów i słów."""
-    if not corrections:
-        return result
-
-    import re as _re
-
-    # Skompiluj wzorce raz
-    patterns = [(_re.compile(r'\b' + _re.escape(w) + r'\b', _re.IGNORECASE), r) for w, r in corrections.items()]
-
-    def correct_text(text):
-        for pat, right in patterns:
-            text = pat.sub(right, text)
-        return text
-
-    count = 0
-    for seg in result.get("segments", []):
-        original = seg.get("text", "")
-        corrected = correct_text(original)
-        if corrected != original:
-            count += 1
-        seg["text"] = corrected
-        for w in seg.get("words", []):
-            w["word"] = correct_text(w.get("word", ""))
-
-    if count:
-        print(f"[+] Korekta nazw: poprawiono tekst w {count} segmentach")
-    return result
-
-def smooth_word_speakers(result):
-    """Wygładza przypisanie mówców: naprawia pojedyncze słowa błędnie przypisane
-    na granicach wypowiedzi (np. wtrącenia, końcówki zdań). Jeśli pojedyncze słowo
-    ma innego mówcę niż oba sąsiednie słowa o tym samym mówcy — przypisz je sąsiadom."""
-    # Zbierz płaską listę wszystkich słów z odniesieniem do segmentu
-    all_words = []
-    for seg in result.get("segments", []):
-        seg_spk = seg.get("speaker", "UNKNOWN")
-        for w in seg.get("words", []):
-            all_words.append(w)
-
-    if len(all_words) < 3:
-        return result
-
-    # Pass 1: napraw izolowane pojedyncze słowa (A B A -> A A A)
-    changed = 0
-    for i in range(1, len(all_words) - 1):
-        prev_spk = all_words[i-1].get("speaker")
-        cur_spk = all_words[i].get("speaker")
-        next_spk = all_words[i+1].get("speaker")
-        if prev_spk and prev_spk == next_spk and cur_spk != prev_spk:
-            all_words[i]["speaker"] = prev_spk
-            changed += 1
-
-    # Pass 2: napraw izolowane pary na granicach (krótkie wtrącenia 2 słów)
-    for i in range(1, len(all_words) - 2):
-        prev_spk = all_words[i-1].get("speaker")
-        s1 = all_words[i].get("speaker")
-        s2 = all_words[i+1].get("speaker")
-        after = all_words[i+2].get("speaker")
-        if prev_spk and prev_spk == after and s1 == s2 and s1 != prev_spk:
-            all_words[i]["speaker"] = prev_spk
-            all_words[i+1]["speaker"] = prev_spk
-            changed += 1
-
-    if changed:
-        print(f"[+] Wygładzanie mówców: poprawiono {changed} granic wypowiedzi")
-    return result
 
 def split_segments_by_speaker(result):
     """Post-processing: rozdziela segmenty gdzie WhisperX przypisał słowa do różnych mówców."""
@@ -399,8 +303,6 @@ def main():
     parser.add_argument("--min-speakers", type=int, default=None, help="Minimalna oczekiwana liczba mówców (opcjonalnie)")
     parser.add_argument("--max-speakers", type=int, default=None, help="Maksymalna oczekiwana liczba mówców (opcjonalnie)")
     parser.add_argument("--use-ollama", action="store_true", help="Użyj lokalnego modelu Ollama do ulepszenia tekstu i podsumowania")
-    parser.add_argument("--initial-prompt", default=None, help="Podpowiedź dla Whispera — lista nazwisk/nazw własnych poprawiająca rozpoznawanie (np. 'Dorota Spyrka, Adrian Zandberg')")
-    parser.add_argument("--names-file", default="names.txt", help="Plik ze słownikiem korekt nazw (format: błędna=poprawna), domyślnie names.txt")
     
     args = parser.parse_args()
 
@@ -426,15 +328,8 @@ def main():
             compute_type=args.compute_type,
             min_speakers=args.min_speakers,
             max_speakers=args.max_speakers,
-            batch_size=args.batch_size,
-            initial_prompt=args.initial_prompt
+            batch_size=args.batch_size
         )
-
-        # 1b. Korekta nazw własnych ze słownika (names.txt)
-        corrections = load_name_corrections(args.names_file)
-        if corrections:
-            print(f"[*] Wczytano {len(corrections)} reguł korekty nazw z {args.names_file}")
-            result = apply_name_corrections(result, corrections)
 
         # 2. Zapis wyników bazowych
         txt_content, md_content = save_results(result, diarized, args.output_dir, base_name)

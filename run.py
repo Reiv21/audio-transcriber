@@ -76,8 +76,6 @@ def main():
     parser.add_argument("-n", "--num-posts", type=int, default=5, help="Ile postów wygenerować (domyślnie: 5)")
     parser.add_argument("--min-speakers", type=int, default=None, help="Minimalna liczba mówców (domyślnie: auto)")
     parser.add_argument("--max-speakers", type=int, default=None, help="Maksymalna liczba mówców (domyślnie: auto)")
-    parser.add_argument("--initial-prompt", default=None, help="Podpowiedź dla Whispera — lista nazwisk poprawiająca rozpoznawanie nazw własnych")
-    parser.add_argument("--names-file", default="names.txt", help="Plik korekt nazw (format: błędna=poprawna), domyślnie names.txt")
     
     args = parser.parse_args()
 
@@ -174,10 +172,6 @@ def main():
         transcribe_cmd.extend(["--min-speakers", str(args.min_speakers)])
     if args.max_speakers is not None:
         transcribe_cmd.extend(["--max-speakers", str(args.max_speakers)])
-    if args.initial_prompt:
-        transcribe_cmd.extend(["--initial-prompt", args.initial_prompt])
-    if args.names_file:
-        transcribe_cmd.extend(["--names-file", args.names_file])
     if not args.no_ollama:
         transcribe_cmd.append("--use-ollama")
 

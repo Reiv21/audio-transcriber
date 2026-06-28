@@ -949,9 +949,6 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       <a href="/live" class="btn-upload" style="margin-top:8px;text-decoration:none;border-color:rgba(167,139,250,0.4);background:rgba(167,139,250,0.06);color:var(--accent-1)">
         🎙️ Transkrypcja na żywo
       </a>
-      <button class="btn-upload" id="btnClearAll" onclick="clearAllTranscripts()" style="margin-top:8px;border-color:rgba(248,113,113,0.4);background:rgba(248,113,113,0.06);color:#f87171">
-        🗑️ Wyczyść wszystkie
-      </button>
     </div>
   </aside>
 
@@ -1040,8 +1037,6 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
             </div>
           </div>
           <div class="config-actions">
-            <span id="learningInfo" style="margin-right:auto;font-size:0.72rem;color:var(--text-dim);align-self:center"></span>
-            <button class="post-btn" onclick="clearLearning()" title="Wyczyść wszystkie przykłady uczenia">🧹 Wyczyść naukę</button>
             <button class="post-btn" onclick="togglePostsConfig()">Anuluj</button>
             <button class="btn-generate" id="btnGenerate" onclick="generatePosts()">Generuj ⚡</button>
           </div>
@@ -1258,75 +1253,6 @@ function groupBySpeaker(segs){
   return groups;
 }
 
-// ── Interpolacja timestampów słów ─────────────────────────────────────
-// Naprawia rozjazd czasu: gdy alignment zawiedzie, słowa nie mają własnych
-// timestampów. Wypełniamy luki interpolując liniowo między znanymi punktami,
-// gwarantując monotonicznie rosnące, nienakładające się przedziały.
-function interpolateWordTimes(words, segStart, segEnd){
-  const n = words.length;
-  const result = new Array(n);
-
-  // Wyciągnij surowe timestampy (null jeśli brak/nieprawidłowe)
-  const rawStart = words.map(w => (typeof w.start === 'number' && !isNaN(w.start)) ? w.start : null);
-  const rawEnd   = words.map(w => (typeof w.end === 'number' && !isNaN(w.end)) ? w.end : null);
-
-  // Sprawdź czy timestampy są sensowne (rosnące i różne)
-  let validCount = 0;
-  for(let i = 0; i < n; i++){ if(rawStart[i] !== null) validCount++; }
-
-  // Jeśli mniej niż połowa słów ma czas, albo wszystkie identyczne — interpoluj równomiernie
-  const allSame = validCount > 1 && rawStart.filter(v => v !== null).every((v, _, arr) => v === arr[0]);
-
-  if(validCount < 2 || allSame){
-    // Rozłóż słowa równomiernie na czas trwania segmentu
-    const span = Math.max(segEnd - segStart, 0.1);
-    const step = span / n;
-    for(let i = 0; i < n; i++){
-      result[i] = {
-        start: round3(segStart + i * step),
-        end:   round3(segStart + (i + 1) * step)
-      };
-    }
-    return result;
-  }
-
-  // Mamy wystarczająco anchorów — wypełnij brakujące przez interpolację
-  // Najpierw starty
-  const starts = rawStart.slice();
-  // Forward-fill brzegów
-  if(starts[0] === null) starts[0] = segStart;
-  if(starts[n-1] === null) starts[n-1] = (rawEnd[n-1] !== null ? rawEnd[n-1] : segEnd);
-
-  for(let i = 0; i < n; i++){
-    if(starts[i] === null){
-      // Znajdź poprzedni i następny znany
-      let prev = i - 1; while(prev >= 0 && starts[prev] === null) prev--;
-      let next = i + 1; while(next < n && rawStart[next] === null) next++;
-      const prevVal = prev >= 0 ? starts[prev] : segStart;
-      const nextVal = next < n ? rawStart[next] : segEnd;
-      const gap = next - prev;
-      starts[i] = prevVal + (nextVal - prevVal) * (i - prev) / gap;
-    }
-  }
-
-  // Wymuś monotoniczność i policz endy jako start następnego słowa
-  for(let i = 0; i < n; i++){
-    let s = starts[i];
-    if(i > 0 && s < result[i-1].start) s = result[i-1].start + 0.01;
-    let e;
-    if(rawEnd[i] !== null && rawEnd[i] > s){
-      e = rawEnd[i];
-    } else if(i < n - 1){
-      e = starts[i+1] > s ? starts[i+1] : s + 0.2;
-    } else {
-      e = segEnd > s ? segEnd : s + 0.3;
-    }
-    result[i] = {start: round3(s), end: round3(e)};
-  }
-  return result;
-}
-function round3(x){ return Math.round(x * 1000) / 1000; }
-
 // ── Generowanie struktury DOM transkrypcji (zoptymalizowane DocumentFragment) ──
 function renderTranscript(transcriptData) {
   const segments = transcriptData.segments || [];
@@ -1422,14 +1348,12 @@ function renderTranscript(transcriptData) {
         wordsFrag.appendChild(document.createTextNode(' '));
         allWords.push({el:span, start:seg.start, end:seg.end, speaker:spk});
       } else {
-        // Interpoluj brakujące/zduplikowane timestampy słów, by uniknąć rozjazdu czasu
-        const times = interpolateWordTimes(words, seg.start, seg.end);
-        words.forEach((wd, wi) => {
+        words.forEach(wd => {
           const span = document.createElement('span');
           span.className = 'w';
           span.textContent = wd.word;
-          const ws = times[wi].start;
-          const we = times[wi].end;
+          const ws = wd.start != null ? wd.start : seg.start;
+          const we = wd.end   != null ? wd.end   : seg.end;
           span.dataset.start = ws;
           span.dataset.end   = we;
           span.dataset.speaker = spk;
@@ -1746,30 +1670,6 @@ async function deleteTranscript(filename, title, e) {
   }
 }
 
-async function clearAllTranscripts() {
-  const items = document.querySelectorAll('.transcript-item');
-  if (items.length === 0) {
-    alert('Brak transkryptów do usunięcia.');
-    return;
-  }
-  const confirmed = confirm(`Czy na pewno chcesz bezpowrotnie usunąć WSZYSTKIE transkrypty (${items.length}) wraz z plikami audio? Tej operacji nie można cofnąć.`);
-  if (!confirmed) return;
-  // Druga potwierdzenie dla bezpieczeństwa
-  if (!confirm('Na pewno? To usunie absolutnie wszystko.')) return;
-
-  try {
-    const response = await fetch('/api/delete-all', { method: 'POST' });
-    if (!response.ok) throw new Error("Błąd podczas usuwania plików z serwera");
-    const data = await response.json();
-    await loadTranscriptList();
-    showEmptyState();
-    showToast(`Usunięto ${data.deleted_count || 0} transkryptów.`);
-  } catch (err) {
-    console.error(err);
-    alert("Błąd: " + err.message);
-  }
-}
-
 async function loadTranscriptList() {
   try {
     const response = await fetch('/api/list');
@@ -1890,26 +1790,6 @@ let generatedPosts = []; // {text, sources:[], status: 'pending'|'accepted'|'rej
 function togglePostsConfig() {
   const cfg = document.getElementById('postsConfig');
   cfg.classList.toggle('visible');
-  if(cfg.classList.contains('visible')) updateLearningInfo();
-}
-
-async function updateLearningInfo(){
-  try{
-    const resp = await fetch('/api/get-feedback');
-    const data = await resp.json();
-    const info = document.getElementById('learningInfo');
-    if(info){
-      const g = (data.good || []).length;
-      const b = (data.bad || []).length;
-      info.textContent = `🎓 Nauka: ${g} dobrych, ${b} złych przykładów`;
-    }
-  } catch(e){}
-}
-
-async function clearLearning(){
-  if(!confirm('Wyczyścić wszystkie przykłady uczenia (dobre i złe)?')) return;
-  await sendFeedback('clear', '');
-  updateLearningInfo();
 }
 
 // ── Usuwanie podświetleń źródeł ───────────────────────────────────────
@@ -1923,68 +1803,63 @@ function clearAllHighlights(){
 // ── Fuzzy match: szukanie fragmentu źródłowego w transkrypcji ─────────
 function fuzzyMatchSource(sourceText, wordsArr){
   if(!sourceText || !wordsArr.length) return [];
-
+  
+  // Normalizuj źródło do tablicy słów (lowercase, bez interpunkcji)
   function normalize(s){ return s.toLowerCase().replace(/[^\wąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g,' ').split(/\s+/).filter(Boolean); }
-
+  
   const srcWords = normalize(sourceText);
-  if(srcWords.length < 2) return [];
-
+  if(srcWords.length < 3) return [];
+  
+  // Zbuduj tablicę znormalizowanych słów z transkrypcji
   const txWords = wordsArr.map(w => normalize(w.el.textContent)[0] || '');
-
-  // Zbiór słów źródłowych dla szybkiego sprawdzenia (pomija bardzo częste krótkie słowa)
-  const stopwords = new Set(['i','w','z','na','do','to','że','się','jest','a','o','co','jak','po','za','od','nie','tak','ale','już','czy','bo','no','to']);
-  const srcSet = new Set(srcWords.filter(w => w.length > 2 && !stopwords.has(w)));
-
-  let bestScore = -1, bestStart = -1, bestEnd = -1;
-
-  // Dla każdej pozycji startowej, dopasuj dwoma wskaźnikami z tolerancją przeskoków
-  for(let i = 0; i < txWords.length; i++){
-    // Szybkie odrzucenie: pierwsze znaczące słowo musi pasować
-    if(!srcSet.has(txWords[i])) continue;
-
-    let si = 0, ti = i;
-    let matched = 0, gaps = 0;
-    let lastMatched = i;
-    const maxGap = 4; // ile słów z rzędu można pominąć
-
-    while(si < srcWords.length && ti < txWords.length){
+  
+  // Sliding window: szukaj okna w transkrypcji gdzie jest najwięcej słów ze źródła
+  const windowSize = Math.min(srcWords.length * 3, txWords.length); // okno szukania
+  let bestScore = 0, bestStart = -1, bestEnd = -1;
+  
+  // Dla każdej możliwej pozycji startowej w transkrypcji
+  for(let i = 0; i <= txWords.length - Math.floor(srcWords.length * 0.4); i++){
+    // Próbuj dopasować sekwencję srcWords zaczynając od i
+    let matched = 0;
+    let si = 0;  // indeks w source
+    let lastMatchedTi = i;
+    const matchedIndices = [];
+    
+    for(let ti = i; ti < Math.min(i + windowSize, txWords.length) && si < srcWords.length; ti++){
       if(txWords[ti] === srcWords[si]){
         matched++;
-        lastMatched = ti;
-        si++; ti++;
-        gaps = 0;
-      } else {
-        // Spróbuj dopasować przesuwając wskaźnik źródła (różnice w parafrazie)
-        let foundAhead = false;
-        for(let k = 1; k <= 2 && si + k < srcWords.length; k++){
-          if(txWords[ti] === srcWords[si + k]){
-            si += k; foundAhead = true; break;
-          }
+        matchedIndices.push(ti);
+        lastMatchedTi = ti;
+        si++;
+      } else if(txWords[ti] === srcWords[si+1] && si+1 < srcWords.length){
+        // Skip jedno słowo w source (drobna różnica)
+        si++;
+        if(txWords[ti] === srcWords[si]){
+          matched++;
+          matchedIndices.push(ti);
+          lastMatchedTi = ti;
+          si++;
         }
-        if(foundAhead) continue;
-        // Inaczej przesuń transkrypt (pomiń słowo)
-        ti++;
-        gaps++;
-        if(gaps > maxGap) break;
       }
     }
-
+    
+    // Oceń jakość dopasowania
     const coverage = matched / srcWords.length;
-    // Score faworyzuje dopasowanie i pokrycie
-    const score = matched + coverage * 3;
-    // Akceptuj jeśli min 35% pokrycia i co najmniej 2 słowa (3 dla krótkich źródeł)
-    const minWords = srcWords.length <= 4 ? 2 : 3;
-    if(coverage >= 0.35 && matched >= minWords && score > bestScore){
-      bestScore = score;
+    // Chcemy minimum 40% pokrycia i co najmniej 4 trafione słowa
+    if(coverage > 0.4 && matched >= 4 && matched > bestScore){
+      bestScore = matched;
       bestStart = i;
-      bestEnd = lastMatched;
+      bestEnd = lastMatchedTi;
     }
   }
-
+  
   if(bestStart < 0) return [];
-
+  
+  // Zwróć ciągły zakres indeksów od bestStart do bestEnd (podświetl cały fragment)
   const result = [];
-  for(let i = bestStart; i <= bestEnd; i++) result.push(i);
+  for(let i = bestStart; i <= bestEnd; i++){
+    result.push(i);
+  }
   return result;
 }
 
@@ -2006,23 +1881,13 @@ function highlightSources(){
 
 // ── Czyszczenie tekstu posta z artefaktów ─────────────────────────────
 function cleanPostText(text){
-  let t = text
-    .replace(/\[\u0179R\u00d3D\u0141O:.*?\]/gis, '')  // Usuń [ŹRÓDŁO:...]
+  return text
     .replace(/\[ŹRÓDŁO:.*?\]/gis, '')           // Usuń tagi [ŹRÓDŁO:...]
     .replace(/^-{3,}$/gm, '')                   // Usuń linie z samymi myślnikami
     .replace(/^\*\*Post \d+\*\*\n?/i, '')       // Usuń **Post N**
     .replace(/^\d+\.\s*/, '')                    // Usuń numerację "1. "
     .replace(/\n{3,}/g, '\n\n')                 // Zbyt wiele pustych linii
     .trim();
-  // Usuń wszelkie cudzysłowy okalające treść po dwukropku w prefixie posta
-  var quoteRe = /[\u0022\u201c\u201d\u201e\u201f\u00ab\u00bb\u2018\u2019\u0027]/g;
-  t = t.replace(/([\u{1F4AC}][^:]+:\s*)[\u0022\u201c\u201d\u201e\u201f\u00ab\u00bb\u2018\u2019\u0027]+\s*/gu, '$1');
-  // Usuń zamykające cudzysłowy przed hashtagiem
-  t = t.replace(/\s*[\u0022\u201c\u201d\u201e\u201f\u00ab\u00bb\u2018\u2019\u0027]+\s*(#\w)/g, ' $1');
-  // Usuń cudzysłowy na początku i końcu całego tekstu
-  t = t.replace(/^[\u0022\u201c\u201d\u201e\u201f\u00ab\u00bb\u2018\u2019\u0027]+/, '');
-  t = t.replace(/[\u0022\u201c\u201d\u201e\u201f\u00ab\u00bb\u2018\u2019\u0027]+$/, '');
-  return t.trim();
 }
 
 async function generatePosts() {
@@ -2079,7 +1944,7 @@ async function generatePosts() {
         sources: p.sources || [],
         status: 'pending',
         hlEnabled: true
-      })).filter(p => p.text.length > 5 && p.text.includes('💬'));
+      })).filter(p => p.text.length > 5);
     } else {
       // Fallback — stary format string
       const rawText = data.posts || '';
@@ -2089,7 +1954,7 @@ async function generatePosts() {
         sources: [],
         status: 'pending',
         hlEnabled: true
-      })).filter(p => p.text.length > 5 && p.text.includes('💬'));
+      })).filter(p => p.text.length > 5);
     }
 
     // Zapisz historię konfiguracji
@@ -2209,45 +2074,16 @@ function renderPosts() {
     btnPin.title = 'Przypnij post do panelu bocznego';
     btnPin.addEventListener('click', () => pinPost(idx));
 
-    const btnLearnGood = document.createElement('button');
-    btnLearnGood.className = 'post-btn';
-    btnLearnGood.innerHTML = '👍 Ucz: dobry';
-    btnLearnGood.title = 'Zapisz ten post jako przykład dobrego stylu (model będzie go naśladował)';
-    btnLearnGood.addEventListener('click', () => sendFeedback('add_good', generatedPosts[idx].text));
-
-    const btnLearnBad = document.createElement('button');
-    btnLearnBad.className = 'post-btn';
-    btnLearnBad.innerHTML = '👎 Ucz: zły';
-    btnLearnBad.title = 'Zapisz ten post jako przykład złego stylu (model będzie go unikał)';
-    btnLearnBad.addEventListener('click', () => sendFeedback('add_bad', generatedPosts[idx].text));
-
     const statusEl = document.createElement('span');
     statusEl.className = 'post-status';
     statusEl.textContent = post.status === 'accepted' ? '✓ Zaakceptowany' : post.status === 'rejected' ? '✗ Odrzucony' : 'Oczekujący';
 
-    actions.append(btnAccept, btnReject, btnCopy, btnPin, btnLearnGood, btnLearnBad, statusEl);
+    actions.append(btnAccept, btnReject, btnCopy, btnPin, statusEl);
     card.append(headerRow, textDiv, actions);
     frag.appendChild(card);
   });
 
   container.appendChild(frag);
-}
-
-async function sendFeedback(action, text){
-  try{
-    const resp = await fetch('/api/post-feedback', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action, text})
-    });
-    const data = await resp.json();
-    if(data.error){ showToast('⚠️ ' + data.error); return; }
-    if(action === 'add_good') showToast(`👍 Zapisano jako dobry przykład (${data.good_count} dobrych)`);
-    else if(action === 'add_bad') showToast(`👎 Zapisano jako zły przykład (${data.bad_count} złych)`);
-    else if(action === 'clear') showToast('Wyczyszczono przykłady uczenia');
-  } catch(e){
-    showToast('⚠️ Błąd: ' + e.message);
-  }
 }
 
 function togglePostStatus(idx, status) {
@@ -2736,8 +2572,6 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/job-status":
             job_id = query.get("id", [None])[0]
             self._serve_job_status(job_id)
-        elif path == "/api/get-feedback":
-            self._get_feedback()
         elif path.startswith("/audio/"):
             filename = urllib.parse.unquote(path[7:]) # remove "/audio/"
             self._serve_audio(filename)
@@ -2752,14 +2586,10 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/delete":
             name = query.get("name", [None])[0]
             self._delete_transcript(name)
-        elif path == "/api/delete-all":
-            self._delete_all_transcripts()
         elif path == "/api/generate-posts":
             self._generate_posts()
         elif path == "/api/save-posts":
             self._save_posts()
-        elif path == "/api/post-feedback":
-            self._post_feedback()
         elif path == "/api/upload-transcribe":
             self._upload_and_transcribe()
         elif path == "/live/start":
@@ -2901,40 +2731,6 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    # ── API: Delete ALL transcripts and associated files ────────────
-    def _delete_all_transcripts(self):
-        cls = self.__class__
-        deleted_count = 0
-        if os.path.isdir(cls.transcript_dir):
-            # Collect unique base names from JSON files
-            json_bases = set()
-            for f in os.listdir(cls.transcript_dir):
-                if f.endswith(".json"):
-                    json_bases.add(os.path.splitext(f)[0])
-
-            # Delete every file whose base matches a transcript (json, txt, md, audio, posty, etc.)
-            for f in list(os.listdir(cls.transcript_dir)):
-                file_path = os.path.join(cls.transcript_dir, f)
-                if os.path.isfile(file_path):
-                    try:
-                        os.remove(file_path)
-                        if f.endswith(".json"):
-                            deleted_count += 1
-                    except Exception as e:
-                        print(f"[!] Błąd podczas usuwania pliku {file_path}: {e}")
-
-        # Reset class state to empty
-        cls.page_title = "Brak transkrypcji"
-        cls.transcript_data = {"segments": []}
-        cls.audio_path = ""
-
-        payload = json.dumps({"status": "success", "deleted_count": deleted_count}).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
     # ── API: Generate posts via Ollama ─────────────────────────────
     def _generate_posts(self):
         if not http_requests:
@@ -2980,44 +2776,29 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             with open(posty_path, 'r', encoding='utf-8') as f:
                 example_posts = f.read().strip()
 
-        # Load learning feedback (good/bad examples)
-        feedback = self._load_feedback()
-        good_examples = feedback.get("good", [])
-        bad_examples = feedback.get("bad", [])
-
-        # Build few-shot learning section from feedback
-        learning_section = ""
-        if good_examples:
-            good_list = "\n\n".join(f"✅ DOBRY POST:\n{ex}" for ex in good_examples[-8:])
-            learning_section += f"\n\n=== PRZYKŁADY DOBRYCH POSTÓW (naśladuj ten styl i długość) ===\n{good_list}\n"
-        if bad_examples:
-            bad_list = "\n\n".join(f"❌ ZŁY POST:\n{ex}" for ex in bad_examples[-6:])
-            learning_section += f"\n\n=== PRZYKŁADY ZŁYCH POSTÓW (NIE pisz w ten sposób) ===\n{bad_list}\n"
-
-        # Build prompt — minimalne zmiany, dłuższe posty, z DOSŁOWNYM cytatem źródłowym
-        system_prompt = f"""Jesteś profesjonalnym twórcą postów na media społecznościowe. Twoim zadaniem jest przekształcanie najważniejszych wypowiedzi z transkrypcji w posty, z MINIMALNYMI zmianami względem oryginału.
+        # Build prompt — bliskie parafrazowanie z DOSŁOWNYM cytatem źródłowym
+        system_prompt = f"""Jesteś profesjonalnym twórcą postów na media społecznościowe. Twoim zadaniem jest tworzenie bliskich parafraz najważniejszych wypowiedzi z podanego tekstu transkrypcji.
 
 BEZWZGLĘDNE ZASADY:
-1. Każdy post powinien być MOŻLIWIE BLISKI oryginałowi — kopiuj wypowiedź niemal słowo w słowo, usuwając jedynie zająknięcia ("yyy", "eee"), powtórzenia i błędy językowe. NIE streszczaj, NIE skracaj nadmiernie.
-2. Każdy post powinien być DŁUŻSZY — od 2 do 4 pełnych zdań (około 40-80 słów). Wybieraj dłuższe, spójne fragmenty wypowiedzi, nie pojedyncze zdania.
-3. ABSOLUTNY ZAKAZ dodawania informacji nieobecnych w tekście transkrypcji! Nie wymyślaj faktów, nie dodawaj opinii ani interpretacji.
-4. Każdy post MUSI zaczynać się DOKŁADNIE od: 💬 {username} w {program}:
-5. Każdy post MUSI kończyć się hashtagiem: #RAZEMwMEDIACH
-6. Po KAŻDYM poście napisz w NOWEJ linii tag ŹRÓDŁO zawierający DOKŁADNY, DOSŁOWNY fragment skopiowany z transkrypcji (kopiuj słowo w słowo, włącznie z ewentualnymi błędami).
-7. NIE pisz ŻADNYCH wstępów, nagłówków, numeracji ani podsumowań. NIE pisz "Oto X postów". Pierwsza linia odpowiedzi MUSI zaczynać się od 💬.
+1. Każdy post to BLISKA PARAFRAZA — zachowujesz sens i znaczenie, ale możesz delikatnie przeredagować dla naturalności brzmienia.
+2. ABSOLUTNY ZAKAZ dodawania informacji nieobecnych w tekście transkrypcji! Nie wymyślaj faktów, nie dodawaj opinii.
+3. Każdy post MUSI zaczynać się od: 💬 {username} w {program}:
+4. Każdy post MUSI kończyć się hashtagiem: #RAZEMwMEDIACH
+5. Po KAŻDYM poście napisz w NOWEJ linii tag ŹRÓDŁO zawierający DOKŁADNY, DOSŁOWNY fragment skopiowany z transkrypcji (minimum 8 słów, kopiuj słowo w słowo z tekstu powyżej, włącznie z ewentualnymi błędami i powtórzeniami).
 
 KRYTYCZNA UWAGA O ŹRÓDLE:
 - Tag [ŹRÓDŁO: ...] MUSI zawierać tekst IDENTYCZNY z tym co jest w transkrypcji — kopiuj-wklej, NIE parafrazuj!
-- Źródło to fragment od 15 do 60 słów z oryginalnej transkrypcji (dłuższy fragment = lepiej).
+- Źródło to fragment od 8 do 40 słów z oryginalnej transkrypcji.
+- Jeśli post bazuje na kilku zdaniach, skopiuj najważniejsze zdanie.
 
-PRZYKŁAD POPRAWNEGO POSTA (naśladuj DOKŁADNIE ten format):
-💬 {username} w {program}: Najważniejsza rzecz w komunikacji publicznej to to, żeby transport publiczny był dostępny. Powinien być dostępny cenowo, wygodny do skorzystania i umożliwiać ludziom przemieszczanie się tak, żeby wybierali transport publiczny. Uważam, że powinniśmy rozważyć przywrócenie biletu dwudziestominutowego. #RAZEMwMEDIACH
-[ŹRÓDŁO: Najważniejsza rzecz w komunikacji publicznej to jest to, żeby transport publiczny był dostępny. On powinien być dostępny cenowo, powinien być wygodny do skorzystania, powinien umożliwać ludziom przemieszczanie się tak, żeby wybierali transport publiczny]
-{learning_section}
-Oddzielaj posty podwójną nową linią. Zacznij od razu od pierwszego posta (od 💬), bez żadnego wstępu.
+FORMAT ODPOWIEDZI:
+💬 {username} w {program}: <treść parafrazy> #RAZEMwMEDIACH
+[ŹRÓDŁO: <DOSŁOWNY cytat kopiuj-wklej z transkrypcji powyżej>]
+
+Oddzielaj posty podwójną nową linią. Nie pisz wstępów.
 Wygeneruj dokładnie {num_posts} postów."""
 
-        prompt = f"TRANSKRYPCJA DO PRZETWORZENIA:\n{transcript_text}\n\nWygeneruj dokładnie {num_posts} postów. Każdy post zaczyna się od '💬 {username} w {program}:' i kończy '#RAZEMwMEDIACH'. Po każdym poście tag [ŹRÓDŁO:] z DOKŁADNYM cytatem. NIE pisz wstępu."
+        prompt = f"TRANSKRYPCJA DO PRZETWORZENIA:\n{transcript_text}\n\nWygeneruj dokładnie {num_posts} postów. W tagu [ŹRÓDŁO:] kopiuj DOKŁADNE słowa z transkrypcji powyżej."
 
         ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
         ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
@@ -3066,52 +2847,23 @@ Wygeneruj dokładnie {num_posts} postów."""
         posts = []
         # Rozdziel na bloki po podwójnej nowej linii
         blocks = re.split(r'\n\n+', text.strip())
-
-        def is_intro(t):
-            """Wykrywa linie wstępu/boilerplate które nie są postami."""
-            tl = t.lower().strip()
-            # Post zawiera 💬 — to na pewno post
-            if '💬' in t:
-                return False
-            # Blok z hashtagiem #RAZEM — to post
-            if '#RAZEMwMEDIACH' in t or '#razem' in tl:
-                return False
-            # Typowe frazy wstępu
-            intro_patterns = [
-                r'^oto\s', r'postów\s+opartych', r'poniżej\s', r'przedstawiam',
-                r'^\s*💡', r'oto\s+\d+\s+post', r'^here\s', r'na\s+podstawie\s+transkrypcji',
-                r'^\d+\s+post', r'wygenerowa', r'^uwaga'
-            ]
-            for pat in intro_patterns:
-                if re.search(pat, tl):
-                    return True
-            # Blok bez 💬 to prawdopodobnie surowy cytat źródłowy albo wstęp — pomiń
-            if '💬' not in t:
-                return True
-            return False
-
+        
         current_text = ''
         current_sources = []
-
+        
         for block in blocks:
             block = block.strip()
             if not block:
                 continue
-
+            
             # Sprawdź czy blok zawiera wzorzec [ŹRÓDŁO: ...]
             source_pattern = r'\[ŹRÓDŁO:\s*(.*?)\]'
             sources_found = re.findall(source_pattern, block, re.IGNORECASE | re.DOTALL)
-
+            
             # Usuń wzorzec źródła z tekstu
             post_text = re.sub(source_pattern, '', block, flags=re.IGNORECASE | re.DOTALL).strip()
-
+            
             if post_text and len(post_text) > 10:
-                # Pomiń linie wstępu
-                if is_intro(post_text) and not sources_found:
-                    # Blok bez 💬 i bez hashtagu — potraktuj jako source do poprzedniego posta
-                    if current_text and len(post_text) > 20:
-                        current_sources.append(post_text)
-                    continue
                 # To jest nowy post
                 if current_text:
                     posts.append({"text": current_text, "sources": current_sources})
@@ -3120,23 +2872,11 @@ Wygeneruj dokładnie {num_posts} postów."""
             elif sources_found and current_text:
                 # To jest tylko linia ze źródłem do poprzedniego posta
                 current_sources.extend([s.strip() for s in sources_found if s.strip()])
-
+        
         # Dodaj ostatni post
         if current_text:
             posts.append({"text": current_text, "sources": current_sources})
-
-        # Wyczyść cudzysłowy z source'ów i użyj tekstu posta jako fallback source
-        quote_chars = '"\u201c\u201d\u201e\u201f\u00ab\u00bb\u2018\u2019\''
-        for post in posts:
-            # Wyczyść cudzysłowy ze źródeł
-            post["sources"] = [s.strip(quote_chars + ' ') for s in post["sources"] if s.strip(quote_chars + ' ')]
-            # Jeśli nie ma źródeł — wyciągnij treść posta (bez prefiksu/hashtagu) jako źródło
-            if not post["sources"]:
-                # Wyciąg treść między "💬...:" a "#RAZEM..."
-                m = re.search(r'\U0001f4ac[^:]*:\s*(.+?)\s*#', post["text"], re.DOTALL)
-                if m:
-                    post["sources"] = [m.group(1).strip(quote_chars + ' ')]
-
+        
         # Jeśli parsowanie się nie powiodło, zwróć posty z pustymi źródłami
         if not posts:
             # Fallback — traktuj cały tekst jak zwykłe posty
@@ -3145,9 +2885,9 @@ Wygeneruj dokładnie {num_posts} postów."""
                 p = p.strip()
                 if p and len(p) > 10:
                     p_clean = re.sub(r'\[ŹRÓDŁO:.*?\]', '', p, flags=re.IGNORECASE | re.DOTALL).strip()
-                    if p_clean and not is_intro(p_clean):
+                    if p_clean:
                         posts.append({"text": p_clean, "sources": []})
-
+        
         return posts
 
     # ── API: Save posts to file ────────────────────────────────────
@@ -3178,71 +2918,6 @@ Wygeneruj dokładnie {num_posts} postów."""
         self.send_header('Content-Length', str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
-
-    # ── Learning feedback (good/bad post examples) ──────────────────
-    def _feedback_path(self):
-        project_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(project_dir, 'posty_feedback.json')
-
-    def _load_feedback(self):
-        path = self._feedback_path()
-        if os.path.isfile(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return {"good": data.get("good", []), "bad": data.get("bad", [])}
-            except Exception:
-                pass
-        return {"good": [], "bad": []}
-
-    def _save_feedback(self, feedback):
-        try:
-            with open(self._feedback_path(), 'w', encoding='utf-8') as f:
-                json.dump(feedback, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"[!] Błąd zapisu feedbacku: {e}")
-
-    def _post_feedback(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
-        try:
-            params = json.loads(body)
-        except Exception:
-            self._json_error(400, "Nieprawidłowe dane JSON.")
-            return
-
-        action = params.get('action', '')  # 'add_good' | 'add_bad' | 'clear'
-        text = (params.get('text', '') or '').strip()
-
-        feedback = self._load_feedback()
-
-        if action == 'clear':
-            feedback = {"good": [], "bad": []}
-        elif action == 'add_good' and text:
-            if text not in feedback["good"]:
-                feedback["good"].append(text)
-                feedback["good"] = feedback["good"][-30:]  # keep last 30
-            # Remove from bad if present
-            feedback["bad"] = [b for b in feedback["bad"] if b != text]
-        elif action == 'add_bad' and text:
-            if text not in feedback["bad"]:
-                feedback["bad"].append(text)
-                feedback["bad"] = feedback["bad"][-30:]
-            feedback["good"] = [g for g in feedback["good"] if g != text]
-        else:
-            self._json_error(400, "Nieprawidłowa akcja lub pusty tekst.")
-            return
-
-        self._save_feedback(feedback)
-        self._json_ok({
-            "status": "success",
-            "good_count": len(feedback["good"]),
-            "bad_count": len(feedback["bad"])
-        })
-
-    def _get_feedback(self):
-        feedback = self._load_feedback()
-        self._json_ok(feedback)
 
     # ── Helper: JSON error response ────────────────────────────────
     def _json_error(self, code, message):
