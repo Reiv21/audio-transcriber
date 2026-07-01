@@ -949,6 +949,9 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       <a href="/live" class="btn-upload" style="margin-top:8px;text-decoration:none;border-color:rgba(167,139,250,0.4);background:rgba(167,139,250,0.06);color:var(--accent-1)">
         🎙️ Transkrypcja na żywo
       </a>
+      <button class="btn-upload" style="margin-top:8px;border-color:rgba(248,113,113,0.3);background:rgba(248,113,113,0.06);color:#f87171" onclick="deleteAllTranscripts()">
+        🗑️ Wyczyść wszystkie
+      </button>
     </div>
   </aside>
 
@@ -1883,10 +1886,11 @@ function highlightSources(){
 function cleanPostText(text){
   return text
     .replace(/\[ŹRÓDŁO:.*?\]/gis, '')           // Usuń tagi [ŹRÓDŁO:...]
+    .replace(/\[BLOK \d+\]:?\s*/gi, '')         // Usuń [BLOK N]:
     .replace(/^-{3,}$/gm, '')                   // Usuń linie z samymi myślnikami
     .replace(/^\*\*Post \d+\*\*\n?/i, '')       // Usuń **Post N**
     .replace(/^\d+\.\s*/, '')                    // Usuń numerację "1. "
-    .replace(/\n{3,}/g, '\n\n')                 // Zbyt wiele pustych linii
+    .replace(/\n{3,}/g, '\n')                   // Zbyt wiele pustych linii
     .trim();
 }
 
@@ -2074,11 +2078,23 @@ function renderPosts() {
     btnPin.title = 'Przypnij post do panelu bocznego';
     btnPin.addEventListener('click', () => pinPost(idx));
 
+    const btnGood = document.createElement('button');
+    btnGood.className = 'post-btn';
+    btnGood.innerHTML = '👍';
+    btnGood.title = 'Dobry post — zapamiętaj jako wzór';
+    btnGood.addEventListener('click', () => sendFeedback(idx, 'good', btnGood));
+
+    const btnBad = document.createElement('button');
+    btnBad.className = 'post-btn';
+    btnBad.innerHTML = '👎';
+    btnBad.title = 'Zły post — zapamiętaj jako anty-wzór';
+    btnBad.addEventListener('click', () => sendFeedback(idx, 'bad', btnBad));
+
     const statusEl = document.createElement('span');
     statusEl.className = 'post-status';
     statusEl.textContent = post.status === 'accepted' ? '✓ Zaakceptowany' : post.status === 'rejected' ? '✗ Odrzucony' : 'Oczekujący';
 
-    actions.append(btnAccept, btnReject, btnCopy, btnPin, statusEl);
+    actions.append(btnAccept, btnReject, btnCopy, btnPin, btnGood, btnBad, statusEl);
     card.append(headerRow, textDiv, actions);
     frag.appendChild(card);
   });
@@ -2153,6 +2169,39 @@ function clearPosts() {
   generatedPosts = [];
   renderPosts();
   clearAllHighlights();
+}
+
+// ── Feedback (uczenie na przykładach) ─────────────────────────────────
+async function sendFeedback(idx, rating, btn) {
+  const text = generatedPosts[idx].text;
+  try {
+    await fetch('/api/save-post-feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, rating})
+    });
+    btn.style.opacity = '0.3';
+    btn.disabled = true;
+    showToast(rating === 'good' ? '👍 Zapamiętano jako dobry wzór' : '👎 Zapamiętano jako anty-wzór');
+  } catch(e) {
+    showToast('Błąd zapisu feedbacku');
+  }
+}
+
+// ── Usuwanie wszystkich transkrypcji ──────────────────────────────────
+async function deleteAllTranscripts() {
+  if (!confirm('Czy na pewno chcesz BEZPOWROTNIE usunąć WSZYSTKIE transkrypcje i powiązane pliki audio?')) return;
+  if (!confirm('Na pewno? Tej operacji nie można cofnąć.')) return;
+  try {
+    const resp = await fetch('/api/delete-all', {method: 'POST'});
+    if (!resp.ok) throw new Error('Błąd serwera');
+    const data = await resp.json();
+    showToast(`Usunięto ${data.deleted_count} plików.`);
+    await loadTranscriptList();
+    showEmptyState();
+  } catch(e) {
+    alert('Błąd: ' + e.message);
+  }
 }
 
 // Toast notification
@@ -2586,10 +2635,14 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/delete":
             name = query.get("name", [None])[0]
             self._delete_transcript(name)
+        elif path == "/api/delete-all":
+            self._delete_all_transcripts()
         elif path == "/api/generate-posts":
             self._generate_posts()
         elif path == "/api/save-posts":
             self._save_posts()
+        elif path == "/api/save-post-feedback":
+            self._save_post_feedback()
         elif path == "/api/upload-transcribe":
             self._upload_and_transcribe()
         elif path == "/live/start":
@@ -2731,6 +2784,67 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    # ── API: Delete ALL transcripts ────────────────────────────────
+    def _delete_all_transcripts(self):
+        cls = self.__class__
+        if not os.path.isdir(cls.transcript_dir):
+            self._json_error(404, "Katalog transkrypcji nie istnieje.")
+            return
+
+        deleted = []
+        for f in os.listdir(cls.transcript_dir):
+            fpath = os.path.join(cls.transcript_dir, f)
+            if os.path.isfile(fpath):
+                try:
+                    os.remove(fpath)
+                    deleted.append(f)
+                except Exception:
+                    pass
+
+        # Reset state
+        cls.page_title = "Brak transkrypcji"
+        cls.transcript_data = {"segments": []}
+        cls.audio_path = ""
+
+        payload = json.dumps({"status": "success", "deleted_count": len(deleted)}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    # ── API: Save post feedback (good/bad examples for learning) ───
+    def _save_post_feedback(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        post_text = params.get('text', '').strip()
+        rating = params.get('rating', '')  # 'good' or 'bad'
+
+        if not post_text or rating not in ('good', 'bad'):
+            self._json_error(400, "Wymagane pola: text, rating (good/bad)")
+            return
+
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        feedback_path = os.path.join(project_dir, 'posty_feedback.jsonl')
+
+        entry = json.dumps({"text": post_text, "rating": rating, "ts": time.time()}, ensure_ascii=False)
+        with open(feedback_path, 'a', encoding='utf-8') as f:
+            f.write(entry + '\n')
+
+        print(f"\033[92m[+] Feedback zapisany: {rating} — {post_text[:50]}...\033[0m")
+        payload = json.dumps({"status": "ok"}).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     # ── API: Generate posts via Ollama ─────────────────────────────
     def _generate_posts(self):
         if not http_requests:
@@ -2776,35 +2890,102 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             with open(posty_path, 'r', encoding='utf-8') as f:
                 example_posts = f.read().strip()
 
-        # Build prompt — bliskie parafrazowanie z DOSŁOWNYM cytatem źródłowym
-        system_prompt = f"""Jesteś profesjonalnym twórcą postów na media społecznościowe. Twoim zadaniem jest tworzenie bliskich parafraz najważniejszych wypowiedzi z podanego tekstu transkrypcji.
+        # Load feedback examples (good/bad posts for learning)
+        good_examples = []
+        bad_examples = []
+        feedback_path = os.path.join(project_dir, 'posty_feedback.jsonl')
+        if os.path.isfile(feedback_path):
+            with open(feedback_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        if entry.get('rating') == 'good':
+                            good_examples.append(entry['text'])
+                        elif entry.get('rating') == 'bad':
+                            bad_examples.append(entry['text'])
+                    except Exception:
+                        pass
+            good_examples = good_examples[-5:]
+            bad_examples = bad_examples[-5:]
 
-BEZWZGLĘDNE ZASADY:
-1. Każdy post to BLISKA PARAFRAZA — zachowujesz sens i znaczenie, ale możesz delikatnie przeredagować dla naturalności brzmienia.
-2. ABSOLUTNY ZAKAZ dodawania informacji nieobecnych w tekście transkrypcji! Nie wymyślaj faktów, nie dodawaj opinii.
-3. Każdy post MUSI zaczynać się od: 💬 {username} w {program}:
-4. Każdy post MUSI kończyć się hashtagiem: #RAZEMwMEDIACH
-5. Po KAŻDYM poście napisz w NOWEJ linii tag ŹRÓDŁO zawierający DOKŁADNY, DOSŁOWNY fragment skopiowany z transkrypcji (minimum 8 słów, kopiuj słowo w słowo z tekstu powyżej, włącznie z ewentualnymi błędami i powtórzeniami).
+        # Build feedback section
+        feedback_section = ""
+        if good_examples or bad_examples:
+            feedback_section = "\n\n=== INFORMACJA ZWROTNA OD UŻYTKOWNIKA ==="
+            if good_examples:
+                feedback_section += "\nDOBRE posty (pisz w tym stylu):\n"
+                for ex in good_examples:
+                    feedback_section += f"✓ {ex}\n\n"
+            if bad_examples:
+                feedback_section += "\nZŁE posty (NIE pisz tak):\n"
+                for ex in bad_examples:
+                    feedback_section += f"✗ {ex}\n\n"
+            feedback_section += "=== KONIEC ===\n"
 
-KRYTYCZNA UWAGA O ŹRÓDLE:
-- Tag [ŹRÓDŁO: ...] MUSI zawierać tekst IDENTYCZNY z tym co jest w transkrypcji — kopiuj-wklej, NIE parafrazuj!
-- Źródło to fragment od 8 do 40 słów z oryginalnej transkrypcji.
-- Jeśli post bazuje na kilku zdaniach, skopiuj najważniejsze zdanie.
+        # Build example section
+        example_section = ""
+        if example_posts:
+            example_section = f"\n\n=== PRZYKŁADOWE POSTY (WZÓR STYLU) ===\nPisz w IDENTYCZNYM stylu co poniżej:\n\n{example_posts}\n\n=== KONIEC PRZYKŁADÓW ==="
 
-FORMAT ODPOWIEDZI:
-💬 {username} w {program}: <treść parafrazy> #RAZEMwMEDIACH
-[ŹRÓDŁO: <DOSŁOWNY cytat kopiuj-wklej z transkrypcji powyżej>]
+        # ──────────────────────────────────────────────────────────────
+        # STRATEGIA: Backend PROGRAMISTYCZNIE wycina fragmenty tekstu,
+        # a model TYLKO czyści jąknięcia i formatuje nagłówek/hashtag.
+        # Eliminuje halucynacje w małych modelach (8B).
+        # ──────────────────────────────────────────────────────────────
 
-Oddzielaj posty podwójną nową linią. Nie pisz wstępów.
-Wygeneruj dokładnie {num_posts} postów."""
+        # Wyczyść tekst z timestampów i oznaczeń mówców
+        clean_text = re.sub(r'\[\d+:\d+:\d+\]\s*SPEAKER_\d+:', '', transcript_text)
+        clean_text = re.sub(r'\n\s*\n', '\n', clean_text).strip()
 
-        prompt = f"TRANSKRYPCJA DO PRZETWORZENIA:\n{transcript_text}\n\nWygeneruj dokładnie {num_posts} postów. W tagu [ŹRÓDŁO:] kopiuj DOKŁADNE słowa z transkrypcji powyżej."
+        # Podziel na zdania
+        sentences = re.split(r'(?<=[.!?])\s+', clean_text)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 25]
+
+        # Zgrupuj w bloki po 3-4 zdania (każdy blok = 1 post)
+        blocks = []
+        i = 0
+        while i < len(sentences):
+            chunk_size = min(4, len(sentences) - i)
+            block = ' '.join(sentences[i:i+chunk_size])
+            if len(block) > 60:
+                blocks.append(block)
+            i += chunk_size
+
+        # Wybierz num_posts bloków równomiernie rozłożonych
+        if len(blocks) <= num_posts:
+            selected = blocks
+        else:
+            step = len(blocks) / num_posts
+            selected = [blocks[int(i * step)] for i in range(num_posts)]
+
+        # Przygotuj bloki do minimalnej redakcji
+        blocks_text = ""
+        for i, block in enumerate(selected, 1):
+            blocks_text += f"\n[BLOK {i}]: {block}\n"
+
+        system_prompt = f"""Jesteś redaktorem postów. Dostajesz GOTOWE fragmenty tekstu. 
+Twoje JEDYNE zadanie:
+1. Usuń jąknięcia (yyy, eee, uhm) i urwane słowa/zdania.
+2. Na początku dodaj: 💬{username} w {program}:
+3. Na końcu dodaj: #RAZEMwMEDIACH
+4. Przed szczególnie mocnym zdaniem możesz dodać ‼️
+
+ABSOLUTNE ZAKAZY:
+- NIE zmieniaj słów! Kopiuj DOSŁOWNIE (minus jąknięcia).
+- NIE dodawaj swoich zdań/komentarzy/opinii!
+- NIE streszczaj!
+- NIE skracaj — przepisz cały blok!
+- Jeśli zdanie jest urwane — po prostu je pomiń.
+
+Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
+
+        prompt = f"Oto {len(selected)} bloków do przetworzenia na posty. Przepisz każdy blok DOSŁOWNIE, dodając tylko nagłówek i hashtag:\n{blocks_text}"
 
         ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
         ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
 
         try:
-            print(f"\033[94m[-] Generowanie {num_posts} postów (model: {ollama_model}, temp: 0.15)...\033[0m")
+            print(f"\033[94m[-] Generowanie {num_posts} postów (model: {ollama_model})...\033[0m")
             resp = http_requests.post(
                 f"{ollama_url}/api/chat",
                 json={
@@ -2815,7 +2996,7 @@ Wygeneruj dokładnie {num_posts} postów."""
                     ],
                     "stream": False,
                     "options": {
-                        "temperature": 0.15
+                        "temperature": 0.0
                     }
                 },
                 timeout=300,
@@ -2827,8 +3008,13 @@ Wygeneruj dokładnie {num_posts} postów."""
             result_text = resp.json().get('message', {}).get('content', '').strip()
             print(f"\033[92m[+] Wygenerowano posty pomyślnie.\033[0m")
 
-            # Parsowanie strukturalnej odpowiedzi z źródłami
+            # Parsowanie odpowiedzi i dodanie źródeł z oryginalnych bloków
             posts_with_sources = self._parse_posts_with_sources(result_text)
+            
+            # Dodaj źródła — każdy post odpowiada blokowi, którego jest przepisaniem
+            for i, post in enumerate(posts_with_sources):
+                if i < len(selected):
+                    post["sources"] = [selected[i]]
 
             payload = json.dumps({"posts": posts_with_sources}, ensure_ascii=False).encode('utf-8')
             self.send_response(200)
@@ -2843,50 +3029,33 @@ Wygeneruj dokładnie {num_posts} postów."""
 
     @staticmethod
     def _parse_posts_with_sources(text):
-        """Parsuje odpowiedź AI na pary (tekst_posta, lista_źródeł) na podstawie wzorca [ŹRÓDŁO: ...]"""
+        """Parsuje odpowiedź AI na posty. Każdy post zaczyna się od 💬."""
         posts = []
-        # Rozdziel na bloki po podwójnej nowej linii
-        blocks = re.split(r'\n\n+', text.strip())
         
-        current_text = ''
-        current_sources = []
+        # Usuń [ŹRÓDŁO:...] tagi i linie z samymi myślnikami
+        text = re.sub(r'\[ŹRÓDŁO:.*?\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'^-{3,}$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\[BLOK \d+\]:?\s*', '', text, flags=re.MULTILINE)
         
-        for block in blocks:
-            block = block.strip()
-            if not block:
+        # Rozdziel po 💬 — każdy post zaczyna się od tego emoji
+        parts = re.split(r'(?=💬)', text)
+        
+        for part in parts:
+            part = part.strip()
+            if not part or len(part) < 20:
                 continue
-            
-            # Sprawdź czy blok zawiera wzorzec [ŹRÓDŁO: ...]
-            source_pattern = r'\[ŹRÓDŁO:\s*(.*?)\]'
-            sources_found = re.findall(source_pattern, block, re.IGNORECASE | re.DOTALL)
-            
-            # Usuń wzorzec źródła z tekstu
-            post_text = re.sub(source_pattern, '', block, flags=re.IGNORECASE | re.DOTALL).strip()
-            
-            if post_text and len(post_text) > 10:
-                # To jest nowy post
-                if current_text:
-                    posts.append({"text": current_text, "sources": current_sources})
-                current_text = post_text
-                current_sources = [s.strip() for s in sources_found if s.strip()]
-            elif sources_found and current_text:
-                # To jest tylko linia ze źródłem do poprzedniego posta
-                current_sources.extend([s.strip() for s in sources_found if s.strip()])
+            # Wyczyść podwójne nowe linie wewnątrz posta (zachowaj jako spację)
+            cleaned = re.sub(r'\n{2,}', '\n', part).strip()
+            if cleaned:
+                posts.append({"text": cleaned, "sources": []})
         
-        # Dodaj ostatni post
-        if current_text:
-            posts.append({"text": current_text, "sources": current_sources})
-        
-        # Jeśli parsowanie się nie powiodło, zwróć posty z pustymi źródłami
+        # Fallback — jeśli nie znaleziono 💬, rozdziel po podwójnej nowej linii
         if not posts:
-            # Fallback — traktuj cały tekst jak zwykłe posty
             raw_posts = re.split(r'\n\n+', text.strip())
             for p in raw_posts:
                 p = p.strip()
-                if p and len(p) > 10:
-                    p_clean = re.sub(r'\[ŹRÓDŁO:.*?\]', '', p, flags=re.IGNORECASE | re.DOTALL).strip()
-                    if p_clean:
-                        posts.append({"text": p_clean, "sources": []})
+                if p and len(p) > 20:
+                    posts.append({"text": p, "sources": []})
         
         return posts
 
