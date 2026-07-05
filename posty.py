@@ -72,6 +72,7 @@ def generate_posts(
     program: str,
     num_posts: int,
     hashtags: list[str],
+    temperature: float = 0.0,
 ) -> str:
     """Generuje posty za pomocą Ollama."""
 
@@ -95,20 +96,25 @@ Analizuj ich strukturę, ton, użycie emoji, formatowanie i sposób cytowania wy
 BEZWZGLĘDNE ZASADY:
 1. ZABRONIONE jest streszczanie tekstu, opisywanie go własnymi słowami, wymyślanie linków czy dodawanie jakichkolwiek własnych komentarzy!
 2. Każdy post to po prostu 1-3 bezpośrednie zdania WYCIĄGNIĘTE SŁOWO W SŁOWO z transkrypcji (możesz jedynie pominąć zająknięcia jak "yyy").
-3. Każdy post MUSI zaczynać się od: 💬 {username} w {program}:
-4. Każdy post MUSI kończyć się hashtagiem: #RAZEMwMEDIACH (NIGDY nie używaj hashtagu #LigaDebat).
+3. Każdy post MUSI zaczynać się od nagłówka w osobnym wierszu: 💬 {username} w {program}:
+4. Po nagłówku dodaj pusty wiersz (nową linię), a cytat wstaw dopiero w kolejnym wierszu.
+5. Po cytacie dodaj kolejny pusty wiersz (nową linię), a hashtag wstaw w ostatnim wierszu: {hashtag_str} (NIGDY nie używaj hashtagu #LigaDebat).
 
 PRZYKŁAD DZIAŁANIA:
 Tekst wejściowy: "Tak, panie redaktorze, szczególnie, że... Najważniejsza rzecz w komunikacji publicznej to jest to, żeby transport publiczny był dostępny. On powinien być dostępny cenowo, powinien być wygodny do skorzystania, powinien umożliwać ludziom przemieszczanie się tak, żeby wybierali transport publiczny, Ja uważam, że powinniśmy rozważyć przywrócenie biletu dwudziestominutowego."
 
 Twój wygenerowany post:
-💬 {username} w {program}: Najważniejsza rzecz w komunikacji publicznej to jest to, żeby transport publiczny był dostępny. On powinien być dostępny cenowo, wygodny do skorzystania i powinien umożliwać ludziom przemieszczanie się tak, żeby wybierali transport publiczny. Ja uważam, że powinniśmy rozważyć przywrócenie biletu dwudziestominutowego. #RAZEMwMEDIACH
+💬 {username} w {program}:
+
+Najważniejsza rzecz w komunikacji publicznej to jest to, żeby transport publiczny był dostępny. On powinien być dostępny cenowo, wygodny do skorzystania i powinien umożliwać ludziom przemieszczanie się tak, żeby wybierali transport publiczny. Ja uważam, że powinniśmy rozważyć przywrócenie biletu dwudziestominutowego.
+
+{hashtag_str}
 
 Teraz zrób to samo dla poniższego tekstu użytkownika. Wygeneruj dokładnie {num_posts} postów. Oddzielaj posty podwójną nową linią (\\n\\n). Nie pisz żadnych wstępów."""
 
     prompt = f"TRANSKRYPCJA DO PRZETWORZENIA:\n{transcript}\n\nWygeneruj dokładnie {num_posts} postów."
 
-    print(f"\033[94m[-] Wysyłanie do Ollama (model: {ollama_model})...\033[0m")
+    print(f"\033[94m[-] Wysyłanie do Ollama (model: {ollama_model}, temp: {temperature})...\033[0m")
 
     try:
         response = requests.post(
@@ -121,7 +127,7 @@ Teraz zrób to samo dla poniższego tekstu użytkownika. Wygeneruj dokładnie {n
                 ],
                 "stream": False,
                 "options": {
-                    "temperature": 0.0
+                    "temperature": temperature
                 }
             },
             timeout=300,  # 5 minut timeout, bo generowanie wielu postów może potrwać
@@ -173,6 +179,10 @@ def main():
         help="Ile postów wygenerować (domyślnie: 5)",
     )
     parser.add_argument(
+        "--temp", "--temperature", type=float, default=0.0,
+        help="Temperatura AI/kreatywność (domyślnie: 0.0)",
+    )
+    parser.add_argument(
         "--hashtags", nargs="+", default=["#RAZEMwMEDIACH"],
         help="Lista hashtagów do dodania (domyślnie: #RAZEMwMEDIACH). NIE dołączaj #LigaDebat.",
     )
@@ -191,6 +201,7 @@ def main():
     print(f"    Osoba:       {args.osoba} ({args.username})")
     print(f"    Program:     {args.program}")
     print(f"    Model:       {ollama_model}")
+    print(f"    Temperatura: {args.temp}")
     print(f"    Hashtagi:    {' '.join(args.hashtags)}")
     print(f"    Liczba:      {args.num_posts}")
     print()
@@ -209,6 +220,7 @@ def main():
         program=args.program,
         num_posts=args.num_posts,
         hashtags=args.hashtags,
+        temperature=args.temp,
     )
 
     if not result:

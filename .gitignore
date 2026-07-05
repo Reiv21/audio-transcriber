@@ -35,3 +35,16 @@ Thumbs.db
 
 # Kiro
 .kiro/
+
+# Duże pliki mediów (źródła do transkrypcji)
+*.mp3
+*.mp4
+*.wav
+*.m4a
+
+# X Monitor – lokalne dane (cache, wyniki, profile)
+x_monitor/data/
+
+# Selenium profile przeglądarki
+.selenium-brave/
+.selenium-profile/
