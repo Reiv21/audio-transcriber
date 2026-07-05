@@ -32,6 +32,7 @@ except ImportError:
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -571,6 +572,90 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
 .config-field input:focus, .config-field select:focus{
   border-color: var(--accent-0);
 }
+/* Autocomplete dropdown */
+.ac-wrap{position:relative}
+.ac-dropdown{
+  position:absolute;top:100%;left:0;right:0;z-index:500;
+  background:#1a1d24;border:1px solid var(--border);border-radius:6px;
+  max-height:200px;overflow-y:auto;display:none;box-shadow:0 8px 24px rgba(0,0,0,0.5);
+}
+.ac-dropdown.visible{display:block}
+.ac-dropdown .ac-item{
+  padding:8px 12px;font-size:0.82rem;color:var(--text);cursor:pointer;
+  border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.ac-dropdown .ac-item:hover,.ac-dropdown .ac-item.active{
+  background:rgba(108,156,255,0.12);color:var(--text-bright);
+}
+.ac-dropdown .ac-item .ac-sub{font-size:0.7rem;color:var(--text-dim);margin-top:2px}
+/* Card */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+/* Autocomplete dropdown */
+.ac-wrap{ position: relative; }
+.ac-dropdown{
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0; right: 0;
+  background: #1a1d24;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 300;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.ac-dropdown.open{ display: block; }
+.ac-item{
+  padding: 8px 12px;
+  font-size: 0.84rem;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.12s;
+}
+.ac-item:last-child{ border-bottom: none; }
+.ac-item:hover,.ac-item.ac-active{
+  background: rgba(108,156,255,0.15);
+  color: var(--text-bright);
+}
+/* Speaker Finder panel */
+.sf-panel{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.sf-panel h4{
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 12px;
+}
+.sf-result-box{
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  margin-top: 12px;
+}
+.sf-found-label{ color: var(--accent-2); font-weight: 600; }
+.sf-fragment-text{
+  margin-top: 8px;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 0.8rem;
+  word-break: break-word;
+}
+.sf-progress-row{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
 .config-actions{
   margin-top: 16px;
   display: flex;
@@ -1001,6 +1086,40 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
         <span class="kbd">←</span><span class="kbd">→</span> przewiń ±5 s
       </div>
 
+      <!-- Speaker Finder (YouTube) -->
+      <div class="card" style="margin-bottom:16px" id="speakerFinderCard">
+        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="document.getElementById('sfBody').style.display=document.getElementById('sfBody').style.display==='none'?'block':'none'">
+          <h2 style="font-size:0.85rem;font-weight:600;color:var(--text-bright);margin:0">🔍 Speaker Finder (YouTube)</h2>
+          <span style="color:var(--text-dim);font-size:0.7rem">▸ rozwiń</span>
+        </div>
+        <div id="sfBody" style="display:none;margin-top:12px">
+          <div class="config-grid" style="margin-bottom:12px">
+            <div class="config-field">
+              <label>URL YouTube</label>
+              <input type="text" id="sfYoutubeUrl" placeholder="https://youtube.com/watch?v=...">
+            </div>
+            <div class="config-field">
+              <label>Imię osoby do znalezienia</label>
+              <input type="text" id="sfPersonName" placeholder="np. Dorota Spyrka">
+            </div>
+          </div>
+          <button class="btn-generate" id="sfStartBtn" onclick="startSpeakerFinder()">🔍 Transkrybuj i znajdź mówcę</button>
+          <div id="sfProgress" style="display:none;margin-top:12px;text-align:center">
+            <div class="spinner"></div>
+            <p id="sfProgressMsg" style="font-size:0.8rem;color:var(--text-dim)">Pobieranie audio z YouTube...</p>
+          </div>
+          <div id="sfResult" style="display:none;margin-top:12px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px">
+            <p id="sfResultText" style="font-size:0.85rem;color:var(--text)"></p>
+            <p id="sfResultFragment" style="font-size:0.78rem;color:var(--text-dim);margin-top:6px;font-style:italic"></p>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="post-btn accept" onclick="acceptSpeakerResult()">✓ Akceptuj</button>
+              <button class="post-btn reject" onclick="rejectSpeakerResult()">✗ Odrzuć</button>
+            </div>
+          </div>
+          <div id="sfError" style="display:none;margin-top:12px;color:#f87171;font-size:0.82rem"></div>
+        </div>
+      </div>
+
       <!-- Posts Section -->
       <div class="posts-section" id="postsSection">
         <div class="posts-header">
@@ -1009,6 +1128,7 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
             Generuj posty
           </button>
+          <button class="post-btn" id="btnSpeakerFinder" onclick="toggleSpeakerFinder()" style="font-size:0.78rem;padding:6px 12px">&#x1F50D; Speaker Finder</button>
         </div>
 
         <div class="posts-config" id="postsConfig">
@@ -1021,22 +1141,29 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
             </div>
             <div class="config-field">
               <label>Osoba</label>
-              <input type="text" id="cfgOsoba" value="Dorota Spyrka" list="dlOsoba">
-              <datalist id="dlOsoba"></datalist>
+              <div class="ac-wrap">
+                <input type="text" id="cfgOsoba" value="Dorota Spyrka" autocomplete="off">
+                <div class="ac-dropdown" id="acOsobaDropdown"></div>
+              </div>
             </div>
             <div class="config-field">
               <label>Username (@)</label>
-              <input type="text" id="cfgUsername" value="@dorota_spyrka" list="dlUsername">
-              <datalist id="dlUsername"></datalist>
+              <input type="text" id="cfgUsername" value="@dorota_spyrka" autocomplete="off">
             </div>
             <div class="config-field">
               <label>Program / Kanał</label>
-              <input type="text" id="cfgProgram" value="@OficjalneZero" list="dlProgram">
-              <datalist id="dlProgram"></datalist>
+              <div class="ac-wrap">
+                <input type="text" id="cfgProgram" value="@OficjalneZero" autocomplete="off">
+                <div class="ac-dropdown" id="acProgramDropdown"></div>
+              </div>
             </div>
             <div class="config-field">
               <label>Liczba postów</label>
               <input type="number" id="cfgNumPosts" value="5" min="1" max="15">
+            </div>
+            <div class="config-field">
+              <label>Temperatura AI (kreatywność)</label>
+              <input type="number" id="cfgTemperature" value="0.0" min="0.0" max="1.5" step="0.1">
             </div>
           </div>
           <div class="config-actions">
@@ -1044,6 +1171,42 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
             <button class="btn-generate" id="btnGenerate" onclick="generatePosts()">Generuj ⚡</button>
           </div>
         </div>
+
+      <!-- Speaker Finder Panel -->
+      <div class="sf-panel" id="speakerFinderSection" style="display:none">
+        <h4>&#x1F50D; Speaker Finder (z YouTube)</h4>
+        <div class="config-grid">
+          <div class="config-field">
+            <label>URL YouTube</label>
+            <input type="text" id="sfYoutubeUrl" placeholder="https://youtube.com/watch?v=..." autocomplete="off">
+          </div>
+          <div class="config-field">
+            <label>Imię osoby</label>
+            <input type="text" id="sfPersonName" placeholder="np. Tomasz Lis" autocomplete="off">
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn-generate" id="sfStartBtn" onclick="startSpeakerFinder()">&#x1F3D9; Transkrybuj i znajdź mówcę</button>
+          <button class="post-btn" onclick="document.getElementById('speakerFinderSection').style.display='none'">Ukryj</button>
+        </div>
+        <div id="sfProgress" style="display:none;margin-top:14px">
+          <div class="upload-progress-bar-outer">
+            <div class="upload-progress-bar-inner" id="sfProgressBar" style="width:0%"></div>
+          </div>
+          <div class="sf-progress-row">
+            <span id="sfProgressMsg" style="font-size:0.8rem;color:var(--text-dim)">Inicjalizacja...</span>
+            <span id="sfProgressPct" style="font-size:0.8rem;color:var(--accent-0);font-weight:700">0%</span>
+          </div>
+          <div class="upload-progress-steps" id="sfProgressSteps" style="max-height:80px;margin-top:6px"></div>
+        </div>
+        <div id="sfResult" style="display:none">
+          <div class="sf-result-box" id="sfResultContent"></div>
+          <div id="sfResultActions" style="display:none;margin-top:10px;gap:8px">
+            <button class="btn-generate" id="sfAcceptBtn" onclick="acceptSpeakerResult()" style="background:linear-gradient(135deg,var(--accent-2),#059669)">&#x2713; Akceptuj</button>
+            <button class="post-btn" id="sfRejectBtn" onclick="rejectSpeakerResult()">&#x2717; Odrzuć</button>
+          </div>
+        </div>
+      </div>
 
         <div class="posts-loading" id="postsLoading">
           <div class="spinner"></div>
@@ -1208,26 +1371,127 @@ function saveHiddenSpeakers(arr){
   localStorage.setItem(getHiddenSpeakersKey(), JSON.stringify(arr));
 }
 
-// ── Pamięć historii pól konfiguracji postów ───────────────────────────
-const HISTORY_KEY = 'posts_config_history';
-function loadConfigHistory(){
-  try{ return JSON.parse(localStorage.getItem(HISTORY_KEY)) || {osoba:[],username:[],program:[]}; }
-  catch{ return {osoba:[],username:[],program:[]}; }
+// ── Smart Autocomplete — Osoba+Username pairs + Program history ────────
+const PAIRS_KEY = 'person_username_pairs';
+const PROGRAMS_KEY = 'programs_history';
+
+function loadPersonPairs(){
+  try{ return JSON.parse(localStorage.getItem(PAIRS_KEY)) || []; }
+  catch{ return []; }
 }
+function savePersonPair(osoba, username){
+  if(!osoba || !username) return;
+  let pairs = loadPersonPairs();
+  pairs = pairs.filter(p => !(p.osoba === osoba && p.username === username));
+  pairs.push({osoba, username});
+  if(pairs.length > 20) pairs = pairs.slice(-20);
+  localStorage.setItem(PAIRS_KEY, JSON.stringify(pairs));
+}
+function loadProgramsHistory(){
+  try{ return JSON.parse(localStorage.getItem(PROGRAMS_KEY)) || []; }
+  catch{ return []; }
+}
+function saveProgramToHistory(program){
+  if(!program || !program.trim()) return;
+  let h = loadProgramsHistory();
+  h = h.filter(p => p !== program);
+  h.push(program);
+  if(h.length > 20) h = h.slice(-20);
+  localStorage.setItem(PROGRAMS_KEY, JSON.stringify(h));
+}
+
+// Backward-compat wrapper for existing calls
 function saveConfigHistory(osoba, username, program){
-  const h = loadConfigHistory();
-  function addUnique(arr, val){ if(!val) return arr; arr = arr.filter(v=>v!==val); arr.unshift(val); return arr.slice(0,10); }
-  h.osoba = addUnique(h.osoba, osoba);
-  h.username = addUnique(h.username, username);
-  h.program = addUnique(h.program, program);
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(h));
+  savePersonPair(osoba, username);
+  saveProgramToHistory(program);
 }
-function populateDataLists(){
-  const h = loadConfigHistory();
-  function fill(dlId, arr){ const dl=document.getElementById(dlId); dl.innerHTML=''; arr.forEach(v=>{ const o=document.createElement('option'); o.value=v; dl.appendChild(o); }); }
-  fill('dlOsoba', h.osoba);
-  fill('dlUsername', h.username);
-  fill('dlProgram', h.program);
+function populateDataLists(){ /* no-op, replaced by autocomplete */ }
+
+// ── Autocomplete engine ───────────────────────────────────────────────
+function fuzzySearch(query, items){
+  if(!query || !query.trim()) return [];
+  const q = query.toLowerCase();
+  const results = [];
+  for(const item of items){
+    const label = (typeof item === 'string') ? item : (item.label || '');
+    const haystack = label.toLowerCase();
+    if(haystack.includes(q)){
+      const score = haystack.startsWith(q) ? 0 : 1;
+      results.push({item, score});
+    }
+  }
+  results.sort((a,b) => a.score - b.score);
+  return results.slice(0, 8).map(r => r.item);
+}
+
+function initAutocomplete(inputEl, dropdownEl, getItems, onSelect){
+  let activeIdx = -1;
+  function show(items){
+    dropdownEl.innerHTML = '';
+    if(items.length === 0){ dropdownEl.classList.remove('visible'); return; }
+    items.forEach((item, i) => {
+      const div = document.createElement('div');
+      div.className = 'ac-item';
+      if(typeof item === 'string'){
+        div.textContent = item;
+      } else {
+        div.innerHTML = `<div>${item.label}</div><div class="ac-sub">${item.sub || ''}</div>`;
+      }
+      div.addEventListener('mousedown', e => { e.preventDefault(); select(item); });
+      dropdownEl.appendChild(div);
+    });
+    dropdownEl.classList.add('visible');
+    activeIdx = -1;
+  }
+  function hide(){ dropdownEl.classList.remove('visible'); activeIdx = -1; }
+  function select(item){ onSelect(item); hide(); }
+  function highlight(idx){
+    const items = dropdownEl.querySelectorAll('.ac-item');
+    items.forEach((el,i) => el.classList.toggle('active', i === idx));
+  }
+
+  inputEl.addEventListener('input', () => {
+    const q = inputEl.value;
+    const all = getItems();
+    const filtered = fuzzySearch(q, all);
+    show(filtered);
+  });
+  inputEl.addEventListener('focus', () => {
+    const q = inputEl.value;
+    const all = getItems();
+    const filtered = fuzzySearch(q, all);
+    if(filtered.length > 0) show(filtered);
+  });
+  inputEl.addEventListener('blur', () => { setTimeout(hide, 150); });
+  inputEl.addEventListener('keydown', e => {
+    const items = dropdownEl.querySelectorAll('.ac-item');
+    if(!dropdownEl.classList.contains('visible') || items.length === 0) return;
+    if(e.key === 'ArrowDown'){ e.preventDefault(); activeIdx = Math.min(activeIdx+1, items.length-1); highlight(activeIdx); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); activeIdx = Math.max(activeIdx-1, 0); highlight(activeIdx); }
+    else if(e.key === 'Enter' && activeIdx >= 0){ e.preventDefault(); items[activeIdx].dispatchEvent(new MouseEvent('mousedown')); }
+    else if(e.key === 'Escape'){ hide(); }
+  });
+}
+
+// Inicjalizacja autocomplete — wywoływana po renderTranscript
+function initAllAutocomplete(){
+  // Osoba → Username (powiązane pary)
+  initAutocomplete(
+    document.getElementById('cfgOsoba'),
+    document.getElementById('acOsobaDropdown'),
+    () => loadPersonPairs().map(p => ({label: p.osoba, sub: p.username, value: p})),
+    (item) => {
+      document.getElementById('cfgOsoba').value = item.value.osoba;
+      document.getElementById('cfgUsername').value = item.value.username;
+    }
+  );
+  // Program (osobna historia)
+  initAutocomplete(
+    document.getElementById('cfgProgram'),
+    document.getElementById('acProgramDropdown'),
+    () => loadProgramsHistory(),
+    (item) => { document.getElementById('cfgProgram').value = item; }
+  );
 }
 
 // ── Dane bieżącej transkrypcji (do filtrowania mówców) ────────────────
@@ -1308,7 +1572,7 @@ function renderTranscript(transcriptData) {
     name.spellcheck = false;
     name.textContent = speakerNames[spk] || spk;
     name.dataset.speaker = spk;
-    
+
     if(!speakerEls.has(spk)) speakerEls.set(spk, []);
     speakerEls.get(spk).push(name);
 
@@ -1384,15 +1648,15 @@ function renderTranscript(transcriptData) {
 }
 
 // ── Wypełnienie select mówców ─────────────────────────────────────────
-function populateSpeakerSelect(){
+function populateSpeakerSelect(resetSelection){
   const select = document.getElementById('cfgSpeakerSelect');
-  const currentVal = select.value;
+  // Reset — NIE zachowuj poprzedniej wartości przy zmianie transkrypcji
   select.innerHTML = '<option value="">— Wszyscy mówcy —</option>';
   const seenSpeakers = new Set();
   const segments = (currentTranscriptData && currentTranscriptData.segments) || [];
   segments.forEach(seg => {
     const spk = seg.speaker || 'UNKNOWN';
-    if(!seenSpeakers.has(spk)){
+    if(spk !== 'UNKNOWN' && !seenSpeakers.has(spk)){
       seenSpeakers.add(spk);
       const opt = document.createElement('option');
       opt.value = spk;
@@ -1400,8 +1664,8 @@ function populateSpeakerSelect(){
       select.appendChild(opt);
     }
   });
-  // Przywróć poprzednią wartość jeśli nadal istnieje
-  if(currentVal && seenSpeakers.has(currentVal)) select.value = currentVal;
+  // Zawsze resetuj do "Wszyscy mówcy" przy ładowaniu nowej transkrypcji
+  select.selectedIndex = 0;
 }
 
 // ── Panel widoczności mówców ──────────────────────────────────────────
@@ -1469,7 +1733,7 @@ function showEmptyState() {
   currentActiveName = "";
   document.getElementById('headerTitle').textContent = "Brak transkrypcji";
   document.title = "Transkrypcja — Brak";
-  
+
   const container = document.getElementById('transcript');
   container.innerHTML = `
     <div style="text-align: center; padding: 60px 20px; color: var(--text-dim);">
@@ -1484,7 +1748,7 @@ function showEmptyState() {
       <p style="font-size: 0.8rem; opacity: 0.7;">Uruchom polecenie <code>python run.py -i plik.mp3</code>, aby dodać nową transkrypcję.</p>
     </div>
   `;
-  
+
   audio.src = "";
   audio.load();
   timeDur.textContent = "0:00";
@@ -1608,7 +1872,7 @@ async function loadTranscript(filename, audioFilename, title) {
     const response = await fetch(`/api/get?name=${encodeURIComponent(filename)}`);
     if (!response.ok) throw new Error("Nie udało się załadować pliku transkrypcji");
     const data = await response.json();
-    
+
     document.querySelectorAll('.transcript-item').forEach(el => {
       if (el.dataset.name === filename) {
         el.classList.add('active');
@@ -1616,13 +1880,13 @@ async function loadTranscript(filename, audioFilename, title) {
         el.classList.remove('active');
       }
     });
-    
+
     currentActiveName = filename;
     renderTranscript(data);
-    
+
     document.getElementById('headerTitle').textContent = title;
     document.title = `Transkrypcja — ${title}`;
-    
+
     if (audioFilename) {
       audio.src = `/audio/${encodeURIComponent(audioFilename)}`;
     } else {
@@ -1637,7 +1901,7 @@ async function loadTranscript(filename, audioFilename, title) {
     generatedPosts = [];
     renderPosts();
     clearAllHighlights();
-    
+
   } catch (err) {
     console.error(err);
     alert("Błąd: " + err.message);
@@ -1646,17 +1910,17 @@ async function loadTranscript(filename, audioFilename, title) {
 
 async function deleteTranscript(filename, title, e) {
   e.stopPropagation(); // Zablokowanie wybrania transkrypcji
-  
+
   const confirmed = confirm(`Czy na pewno chcesz bezpowrotnie usunąć transkrypcję "${title}" oraz wszystkie powiązane z nią pliki (tekstowe, markdown i audio MP3)?`);
   if (!confirmed) return;
-  
+
   try {
     const response = await fetch(`/api/delete?name=${encodeURIComponent(filename)}`, { method: 'POST' });
     if (!response.ok) throw new Error("Błąd podczas usuwania plików z serwera");
-    
+
     // Odświeżenie listy
     await loadTranscriptList();
-    
+
     // Jeśli usunęliśmy aktualnie aktywną transkrypcję
     if (filename === currentActiveName) {
       const items = document.querySelectorAll('.transcript-item');
@@ -1678,10 +1942,10 @@ async function loadTranscriptList() {
     const response = await fetch('/api/list');
     if (!response.ok) throw new Error("Błąd ładowania listy");
     const list = await response.json();
-    
+
     const listContainer = document.getElementById('transcriptList');
     listContainer.innerHTML = '';
-    
+
     if (list.length === 0) {
       const emptyMsg = document.createElement('div');
       emptyMsg.style.fontSize = '0.75rem';
@@ -1692,7 +1956,7 @@ async function loadTranscriptList() {
       listContainer.appendChild(emptyMsg);
       return;
     }
-    
+
     list.forEach(item => {
       const el = document.createElement('div');
       el.className = 'transcript-item';
@@ -1700,17 +1964,17 @@ async function loadTranscriptList() {
         el.classList.add('active');
       }
       el.dataset.name = item.name;
-      
+
       const contentEl = document.createElement('div');
       contentEl.className = 'transcript-item-content';
-      
+
       const titleEl = document.createElement('div');
       titleEl.className = 'transcript-item-title';
       titleEl.textContent = item.title;
-      
+
       const metaEl = document.createElement('div');
       metaEl.className = 'transcript-item-meta';
-      
+
       if (item.audio) {
         metaEl.innerHTML = `
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-2)">
@@ -1727,9 +1991,9 @@ async function loadTranscriptList() {
             <circle cx="18" cy="16" r="3"></circle>
           </svg> Brak audio`;
       }
-      
+
       contentEl.append(titleEl, metaEl);
-      
+
       // Przycisk usuwania
       const delBtn = document.createElement('button');
       delBtn.className = 'btn-delete';
@@ -1743,16 +2007,16 @@ async function loadTranscriptList() {
         </svg>
       `;
       delBtn.addEventListener('click', (e) => deleteTranscript(item.name, item.title, e));
-      
+
       el.append(contentEl, delBtn);
-      
+
       el.addEventListener('click', () => {
         loadTranscript(item.name, item.audio, item.title);
         if (window.innerWidth <= 900) {
           document.getElementById('sidebar').classList.remove('open');
         }
       });
-      
+
       listContainer.appendChild(el);
     });
   } catch (err) {
@@ -1780,9 +2044,9 @@ if (INITIAL_TRANSCRIPT && INITIAL_TRANSCRIPT.segments && INITIAL_TRANSCRIPT.segm
   renderTranscript(INITIAL_TRANSCRIPT);
 } else {
   showEmptyState();
-  populateDataLists();
 }
 loadTranscriptList();
+initAllAutocomplete();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // POSTS GENERATION (z podświetlaniem źródeł)
@@ -1806,20 +2070,20 @@ function clearAllHighlights(){
 // ── Fuzzy match: szukanie fragmentu źródłowego w transkrypcji ─────────
 function fuzzyMatchSource(sourceText, wordsArr){
   if(!sourceText || !wordsArr.length) return [];
-  
+
   // Normalizuj źródło do tablicy słów (lowercase, bez interpunkcji)
   function normalize(s){ return s.toLowerCase().replace(/[^\wąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g,' ').split(/\s+/).filter(Boolean); }
-  
+
   const srcWords = normalize(sourceText);
   if(srcWords.length < 3) return [];
-  
+
   // Zbuduj tablicę znormalizowanych słów z transkrypcji
   const txWords = wordsArr.map(w => normalize(w.el.textContent)[0] || '');
-  
+
   // Sliding window: szukaj okna w transkrypcji gdzie jest najwięcej słów ze źródła
   const windowSize = Math.min(srcWords.length * 3, txWords.length); // okno szukania
   let bestScore = 0, bestStart = -1, bestEnd = -1;
-  
+
   // Dla każdej możliwej pozycji startowej w transkrypcji
   for(let i = 0; i <= txWords.length - Math.floor(srcWords.length * 0.4); i++){
     // Próbuj dopasować sekwencję srcWords zaczynając od i
@@ -1827,7 +2091,7 @@ function fuzzyMatchSource(sourceText, wordsArr){
     let si = 0;  // indeks w source
     let lastMatchedTi = i;
     const matchedIndices = [];
-    
+
     for(let ti = i; ti < Math.min(i + windowSize, txWords.length) && si < srcWords.length; ti++){
       if(txWords[ti] === srcWords[si]){
         matched++;
@@ -1845,7 +2109,7 @@ function fuzzyMatchSource(sourceText, wordsArr){
         }
       }
     }
-    
+
     // Oceń jakość dopasowania
     const coverage = matched / srcWords.length;
     // Chcemy minimum 40% pokrycia i co najmniej 4 trafione słowa
@@ -1855,9 +2119,9 @@ function fuzzyMatchSource(sourceText, wordsArr){
       bestEnd = lastMatchedTi;
     }
   }
-  
+
   if(bestStart < 0) return [];
-  
+
   // Zwróć ciągły zakres indeksów od bestStart do bestEnd (podświetl cały fragment)
   const result = [];
   for(let i = bestStart; i <= bestEnd; i++){
@@ -1890,8 +2154,16 @@ function cleanPostText(text){
     .replace(/^-{3,}$/gm, '')                   // Usuń linie z samymi myślnikami
     .replace(/^\*\*Post \d+\*\*\n?/i, '')       // Usuń **Post N**
     .replace(/^\d+\.\s*/, '')                    // Usuń numerację "1. "
-    .replace(/\n{3,}/g, '\n')                   // Zbyt wiele pustych linii
+    .replace(/\n{3,}/g, '\n\n')                 // Zbyt wiele pustych linii (zostaw max 2)
     .trim();
+}
+
+// ── Filtrowanie artefaktów AI ─────────────────────────────────────────
+function filterValidPost(post){
+  const text = post.text || '';
+  if(text.length < 5) return false;
+  // Akceptuj posty zawierające marker emoji lub hashtag
+  return text.includes('💬') || text.includes('#RAZEMwMEDIACH');
 }
 
 async function generatePosts() {
@@ -1904,6 +2176,7 @@ async function generatePosts() {
   const username = document.getElementById('cfgUsername').value.trim();
   const program = document.getElementById('cfgProgram').value.trim();
   const numPosts = parseInt(document.getElementById('cfgNumPosts').value) || 5;
+  const temperature = parseFloat(document.getElementById('cfgTemperature').value) || 0.0;
   const selectedSpeaker = document.getElementById('cfgSpeakerSelect').value;
 
   // Hide config, show loading
@@ -1929,6 +2202,7 @@ async function generatePosts() {
       body: JSON.stringify({
         transcript_name: currentActiveName,
         osoba, username, program, num_posts: numPosts,
+        temperature,
         speaker_filter: selectedSpeaker || '',
         speaker_text: selectedSpeaker ? transcriptText : ''
       })
@@ -1948,7 +2222,7 @@ async function generatePosts() {
         sources: p.sources || [],
         status: 'pending',
         hlEnabled: true
-      })).filter(p => p.text.length > 5);
+      })).filter(p => filterValidPost(p));
     } else {
       // Fallback — stary format string
       const rawText = data.posts || '';
@@ -1958,11 +2232,18 @@ async function generatePosts() {
         sources: [],
         status: 'pending',
         hlEnabled: true
-      })).filter(p => p.text.length > 5);
+      })).filter(p => filterValidPost(p));
+    }
+
+    if(generatedPosts.length === 0){
+      showToast('Brak poprawnych postów — model nie wygenerował treści w oczekiwanym formacie.');
+      document.getElementById('postsEmpty').style.display = 'block';
+      return;
     }
 
     // Zapisz historię konfiguracji
     saveConfigHistory(osoba, username, program);
+    savePersonUsernamePair(osoba, username);
     populateDataLists();
 
     renderPosts();
@@ -2204,6 +2485,113 @@ async function deleteAllTranscripts() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// SPEAKER FINDER (YouTube → Transkrypcja → Szukanie mówcy)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let sfJobId = null;
+let sfTranscriptName = null;
+let sfFoundSpeaker = null;
+
+async function startSpeakerFinder(){
+  const url = document.getElementById('sfYoutubeUrl').value.trim();
+  const person = document.getElementById('sfPersonName').value.trim();
+  if(!url || !person){ alert('Podaj URL YouTube i imię osoby.'); return; }
+
+  // Reset UI
+  document.getElementById('sfProgress').style.display = 'block';
+  document.getElementById('sfResult').style.display = 'none';
+  document.getElementById('sfError').style.display = 'none';
+  document.getElementById('sfStartBtn').disabled = true;
+  document.getElementById('sfProgressMsg').textContent = 'Pobieranie audio z YouTube...';
+
+  try{
+    // Step 1: Download & transcribe
+    const resp = await fetch('/api/transcribe-youtube', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({youtube_url: url, model: 'medium', device: 'cuda'})
+    });
+    if(!resp.ok){
+      const err = await resp.json();
+      throw new Error(err.error || 'Błąd pobierania');
+    }
+    const data = await resp.json();
+    sfJobId = data.job_id;
+    sfTranscriptName = (data.base_name || 'yt') + '.json';
+
+    // Step 2: Poll job status
+    document.getElementById('sfProgressMsg').textContent = 'Transkrypcja w toku...';
+    await pollSfJob();
+
+    // Step 3: Find speaker
+    document.getElementById('sfProgressMsg').textContent = 'Szukam mówcy w transkrypcji...';
+    const sfResp = await fetch('/api/find-speaker', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({transcript_name: sfTranscriptName, person_name: person})
+    });
+    const sfData = await sfResp.json();
+
+    document.getElementById('sfProgress').style.display = 'none';
+
+    if(sfData.found){
+      sfFoundSpeaker = sfData.speaker_id;
+      document.getElementById('sfResultText').textContent = `✅ Znaleziono: ${sfData.speaker_id} (pewność: ${sfData.confidence}%)`;
+      document.getElementById('sfResultFragment').textContent = sfData.fragment ? `"${sfData.fragment}"` : '';
+      document.getElementById('sfResult').style.display = 'block';
+    } else {
+      document.getElementById('sfError').style.display = 'block';
+      document.getElementById('sfError').textContent = 'Nie znaleziono imienia w transkrypcji. Wybierz mówcę ręcznie.';
+    }
+  } catch(e){
+    document.getElementById('sfProgress').style.display = 'none';
+    document.getElementById('sfError').style.display = 'block';
+    document.getElementById('sfError').textContent = 'Błąd: ' + e.message;
+  } finally {
+    document.getElementById('sfStartBtn').disabled = false;
+  }
+}
+
+async function pollSfJob(){
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try{
+        const resp = await fetch(`/api/job-status?id=${encodeURIComponent(sfJobId)}`);
+        const job = await resp.json();
+        document.getElementById('sfProgressMsg').textContent = job.message || `Postęp: ${job.progress}%`;
+        if(job.status === 'done'){ clearInterval(interval); resolve(); }
+        else if(job.status === 'error'){ clearInterval(interval); reject(new Error(job.message)); }
+      } catch(e){ clearInterval(interval); reject(e); }
+    }, 2000);
+  });
+}
+
+function acceptSpeakerResult(){
+  if(!sfFoundSpeaker) return;
+  // Load the new transcript and set speaker
+  if(sfTranscriptName){
+    loadTranscriptList().then(() => {
+      loadTranscript(sfTranscriptName, '', sfTranscriptName.replace('.json',''));
+    });
+  }
+  // Set speaker select after transcript loads
+  setTimeout(() => {
+    const sel = document.getElementById('cfgSpeakerSelect');
+    for(let i = 0; i < sel.options.length; i++){
+      if(sel.options[i].value === sfFoundSpeaker){ sel.selectedIndex = i; break; }
+    }
+    showToast(`Mówca ${sfFoundSpeaker} ustawiony.`);
+  }, 1500);
+  document.getElementById('sfResult').style.display = 'none';
+}
+
+function rejectSpeakerResult(){
+  document.getElementById('sfResult').style.display = 'none';
+  sfFoundSpeaker = null;
+  showToast('Odrzucono. Wybierz mówcę ręcznie z listy.');
+}
+
 // Toast notification
 function showToast(msg) {
   let toast = document.getElementById('toast');
@@ -2289,7 +2677,7 @@ async function startUploadTranscription(){
   formData.append('device', document.getElementById('uploadDevice').value);
   formData.append('batch_size', '4');
   formData.append('use_ollama', document.getElementById('uploadOllama').checked ? 'true' : 'false');
-  
+
   const minSp = document.getElementById('uploadMinSpeakers').value;
   const maxSp = document.getElementById('uploadMaxSpeakers').value;
   if(minSp) formData.append('min_speakers', minSp);
@@ -2311,7 +2699,7 @@ async function startUploadTranscription(){
     document.getElementById('uploadProgressMsg').textContent = 'Transkrypcja uruchomiona...';
     document.getElementById('uploadProgressBar').style.width = '5%';
     document.getElementById('uploadProgressPct').textContent = '5%';
-    
+
     pollInterval = setInterval(pollJobStatus, 1500);
   } catch(err){
     showUploadError(err.message);
@@ -2393,7 +2781,7 @@ function pinPost(idx){
   const panel = document.getElementById('pinnedPostPanel');
   const label = document.getElementById('pinnedPostLabel');
   const textEl = document.getElementById('pinnedPostText');
-  
+
   label.textContent = `📌 Post #${idx+1}`;
   textEl.textContent = generatedPosts[idx].text;
   panel.classList.add('visible');
@@ -2440,6 +2828,305 @@ function acceptPinnedPost(){
   renderPosts();
   showToast('Post zaakceptowany!');
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUTOCOMPLETE MODULE
+// ══════════════════════════════════════════════════════════════════════════════
+
+function fuzzySearch(query, items) {
+  if (!query || !query.trim()) return [];
+  const q = query.toLowerCase().trim();
+  const results = [];
+  for (const item of items) {
+    const label = (typeof item === 'string') ? item : item.label;
+    if (!label) continue;
+    const haystack = label.toLowerCase();
+    if (haystack.includes(q)) {
+      results.push({ item, score: haystack.startsWith(q) ? 0 : 1 });
+    }
+  }
+  results.sort((a, b) => a.score - b.score);
+  return results.slice(0, 8).map(r => r.item);
+}
+
+function initAutocomplete(inputEl, getItems, onSelect) {
+  const dropdownEl = inputEl.parentElement
+    ? inputEl.parentElement.querySelector('.ac-dropdown')
+    : null;
+  if (!dropdownEl) return;
+
+  let activeIdx = -1;
+  let currentItems = [];
+
+  function renderDropdown(items) {
+    currentItems = items;
+    activeIdx = -1;
+    dropdownEl.innerHTML = '';
+    if (!items.length) { dropdownEl.classList.remove('open'); return; }
+    items.forEach(item => {
+      const label = (typeof item === 'string') ? item : item.label;
+      const div = document.createElement('div');
+      div.className = 'ac-item';
+      div.textContent = label;
+      div.addEventListener('mousedown', e => {
+        e.preventDefault();
+        onSelect(item);
+        dropdownEl.classList.remove('open');
+      });
+      dropdownEl.appendChild(div);
+    });
+    dropdownEl.classList.add('open');
+  }
+
+  inputEl.addEventListener('input', () => {
+    const q = inputEl.value;
+    if (!q.trim()) { dropdownEl.classList.remove('open'); return; }
+    renderDropdown(fuzzySearch(q, getItems()));
+  });
+
+  inputEl.addEventListener('keydown', e => {
+    if (!dropdownEl.classList.contains('open')) return;
+    const itemEls = dropdownEl.querySelectorAll('.ac-item');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, itemEls.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, -1);
+    } else if (e.key === 'Enter' && activeIdx >= 0) {
+      e.preventDefault();
+      onSelect(currentItems[activeIdx]);
+      dropdownEl.classList.remove('open');
+      return;
+    } else if (e.key === 'Escape') {
+      dropdownEl.classList.remove('open');
+      return;
+    }
+    itemEls.forEach((el, i) => el.classList.toggle('ac-active', i === activeIdx));
+  });
+
+  inputEl.addEventListener('blur', () => {
+    setTimeout(() => dropdownEl.classList.remove('open'), 150);
+  });
+}
+
+// ── Person/Username pairs (localStorage key: person_username_pairs) ──────────
+function loadPersonUsernamePairs() {
+  try { return JSON.parse(localStorage.getItem('person_username_pairs')) || []; }
+  catch { return []; }
+}
+function savePersonUsernamePair(osoba, username) {
+  if (!osoba) return;
+  const pairs = loadPersonUsernamePairs();
+  const filtered = pairs.filter(p => !(p.osoba === osoba && p.username === username));
+  filtered.push({ osoba, username });
+  localStorage.setItem('person_username_pairs', JSON.stringify(filtered.slice(-20)));
+}
+
+// ── Programs history (localStorage key: programs_history) ────────────────
+function loadProgramsHistory() {
+  try { return JSON.parse(localStorage.getItem('programs_history')) || []; }
+  catch { return []; }
+}
+function saveProgramToHistory(program) {
+  if (!program || !program.trim()) return;
+  const history = loadProgramsHistory();
+  const filtered = history.filter(p => p !== program);
+  filtered.push(program);
+  localStorage.setItem('programs_history', JSON.stringify(filtered.slice(-20)));
+}
+
+// ── Wire up autocomplete after DOM loads ───────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const osobaEl = document.getElementById('cfgOsoba');
+  if (osobaEl) {
+    initAutocomplete(
+      osobaEl,
+      () => loadPersonUsernamePairs().map(p => ({ label: p.osoba, value: p })),
+      item => {
+        const pair = item.value || { osoba: item.label, username: '' };
+        osobaEl.value = pair.osoba;
+        const usernameEl = document.getElementById('cfgUsername');
+        if (usernameEl) usernameEl.value = pair.username;
+      }
+    );
+  }
+
+  const programEl = document.getElementById('cfgProgram');
+  if (programEl) {
+    initAutocomplete(
+      programEl,
+      () => loadProgramsHistory(),
+      item => {
+        programEl.value = (typeof item === 'string') ? item : item.label;
+      }
+    );
+    programEl.addEventListener('blur', () => {
+      saveProgramToHistory(programEl.value.trim());
+    });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPEAKER FINDER UI
+// ══════════════════════════════════════════════════════════════════════════════
+
+let sfJobId = null;
+let sfPollInterval = null;
+let sfFoundResult = null;
+let sfLastTranscriptName = null;
+
+function toggleSpeakerFinder() {
+  const panel = document.getElementById('speakerFinderSection');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function startSpeakerFinder() {
+  const ytUrl = document.getElementById('sfYoutubeUrl').value.trim();
+  const personName = document.getElementById('sfPersonName').value.trim();
+  if (!ytUrl || !personName) { showToast('Podaj URL YouTube i imię osoby.'); return; }
+
+  document.getElementById('sfProgress').style.display = 'block';
+  document.getElementById('sfResult').style.display = 'none';
+  document.getElementById('sfProgressBar').style.width = '0%';
+  document.getElementById('sfProgressPct').textContent = '0%';
+  document.getElementById('sfProgressMsg').textContent = 'Pobieranie audio z YouTube...';
+  document.getElementById('sfProgressSteps').innerHTML = '';
+  document.getElementById('sfStartBtn').disabled = true;
+  sfFoundResult = null;
+  sfLastTranscriptName = null;
+
+  try {
+    const resp = await fetch('/api/transcribe-youtube', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        youtube_url: ytUrl, model: 'medium', device: 'cuda',
+        compute_type: 'float16', batch_size: 4, use_ollama: true
+      })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Błąd serwera' }));
+      sfShowError(err.error || 'Błąd serwera');
+      return;
+    }
+    const data = await resp.json();
+    sfJobId = data.job_id;
+    sfPollInterval = setInterval(() => sfPollJob(personName), 1500);
+  } catch (err) {
+    sfShowError(err.message);
+  }
+}
+
+async function sfPollJob(personName) {
+  if (!sfJobId) return;
+  try {
+    const resp = await fetch(`/api/job-status?id=${encodeURIComponent(sfJobId)}`);
+    if (!resp.ok) return;
+    const job = await resp.json();
+
+    document.getElementById('sfProgressBar').style.width = job.progress + '%';
+    document.getElementById('sfProgressPct').textContent = job.progress + '%';
+    document.getElementById('sfProgressMsg').textContent = job.message || '';
+
+    if (job.message) {
+      const steps = document.getElementById('sfProgressSteps');
+      const last = steps.lastElementChild;
+      if (!last || last.textContent !== job.message) {
+        const div = document.createElement('div');
+        div.textContent = job.message;
+        steps.appendChild(div);
+        steps.scrollTop = steps.scrollHeight;
+      }
+    }
+
+    if (job.status === 'done') {
+      clearInterval(sfPollInterval); sfPollInterval = null;
+      if (job.result) {
+        sfLastTranscriptName = job.result;
+        await sfFindSpeaker(job.result, personName);
+      } else {
+        sfShowError('Transkrypcja zakończona, ale plik JSON nie został znaleziony.');
+      }
+    } else if (job.status === 'error') {
+      clearInterval(sfPollInterval); sfPollInterval = null;
+      sfShowError(job.message || 'Błąd transkrypcji.');
+    }
+  } catch (e) { /* Ignore transient network errors */ }
+}
+
+async function sfFindSpeaker(transcriptName, personName) {
+  document.getElementById('sfProgressMsg').textContent = 'Szukam mówcy w transkrypcji...';
+  try {
+    const resp = await fetch('/api/find-speaker', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript_name: transcriptName, person_name: personName })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Błąd wyszukiwania' }));
+      sfShowError(err.error || 'Błąd wyszukiwania mówcy.');
+      return;
+    }
+    const result = await resp.json();
+    sfFoundResult = result;
+    sfShowResult(result, transcriptName);
+  } catch (err) {
+    sfShowError(err.message);
+  } finally {
+    document.getElementById('sfStartBtn').disabled = false;
+    document.getElementById('sfProgress').style.display = 'none';
+  }
+}
+
+function sfShowResult(result, transcriptName) {
+  const contentEl = document.getElementById('sfResultContent');
+  const actionsEl = document.getElementById('sfResultActions');
+  document.getElementById('sfResult').style.display = 'block';
+  if (result.found) {
+    contentEl.innerHTML =
+      `<div class="sf-found-label">✅ Znaleziono: ${result.speaker_id} (pewność: ${result.confidence}%)</div>` +
+      (result.fragment ? `<div class="sf-fragment-text">„${result.fragment}“</div>` : '');
+    actionsEl.style.cssText = 'display:flex;margin-top:10px;gap:8px';
+  } else {
+    contentEl.innerHTML = `<div style="color:var(--text-dim)">❌ Nie znaleziono imienia w transkrypcji. Wybierz mówcę ręcznie z listy „Mówca z transkrypcji“.</div>`;
+    actionsEl.style.display = 'none';
+  }
+}
+
+function sfShowError(msg) {
+  document.getElementById('sfStartBtn').disabled = false;
+  document.getElementById('sfProgress').style.display = 'none';
+  document.getElementById('sfResult').style.display = 'block';
+  document.getElementById('sfResultContent').innerHTML = `<div style="color:#f87171">❌ ${msg}</div>`;
+  document.getElementById('sfResultActions').style.display = 'none';
+}
+
+async function acceptSpeakerResult() {
+  if (!sfFoundResult || !sfFoundResult.found) return;
+  const speakerId = sfFoundResult.speaker_id;
+
+  // If the YouTube transcript isn't loaded yet, load it first
+  if (sfLastTranscriptName && sfLastTranscriptName !== currentActiveName) {
+    const title = sfLastTranscriptName.replace(/\.json$/, '');
+    await loadTranscriptList();
+    const listResp = await fetch('/api/list');
+    const list = await listResp.json();
+    const item = list.find(i => i.name === sfLastTranscriptName);
+    const audioFile = item ? item.audio : '';
+    await loadTranscript(sfLastTranscriptName, audioFile, title);
+  }
+
+  document.getElementById('cfgSpeakerSelect').value = speakerId;
+  showToast(`✅ Mówca ${speakerId} ustawiony jako aktywny`);
+  document.getElementById('sfResultActions').style.display = 'none';
+}
+
+function rejectSpeakerResult() {
+  sfFoundResult = null;
+  document.getElementById('sfResult').style.display = 'none';
+  document.getElementById('sfResultActions').style.display = 'none';
+}
 </script>
 </body>
 </html>
@@ -2454,25 +3141,46 @@ _transcription_jobs = {}  # job_id -> {status, progress, message, result}
 _job_lock = threading.Lock()
 
 
-def _run_transcription_job(job_id, audio_path, transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama):
+def _run_transcription_job(
+    job_id,
+    audio_path,
+    transcript_dir,
+    model,
+    device,
+    compute_type,
+    batch_size,
+    min_speakers,
+    max_speakers,
+    use_ollama,
+):
     """Run transcription in a background thread, updating progress."""
     import shutil
 
-    def update(progress, message, status='running'):
+    def update(progress, message, status="running"):
         with _job_lock:
             _transcription_jobs[job_id] = {
-                'status': status,
-                'progress': progress,
-                'message': message,
-                'result': _transcription_jobs.get(job_id, {}).get('result', None)
+                "status": status,
+                "progress": progress,
+                "message": message,
+                "result": _transcription_jobs.get(job_id, {}).get("result", None),
             }
 
     try:
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
-        
+
         # Check if we need to convert
         ext = os.path.splitext(audio_path)[1].lower()
-        is_video = ext in [".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".wmv", ".mpeg", ".mpg"]
+        is_video = ext in [
+            ".mp4",
+            ".mkv",
+            ".avi",
+            ".mov",
+            ".flv",
+            ".webm",
+            ".wmv",
+            ".mpeg",
+            ".mpg",
+        ]
         is_supported_audio = ext in [".mp3", ".wav", ".m4a", ".ogg", ".aac"]
         needs_convert = is_video or not is_supported_audio
 
@@ -2484,14 +3192,25 @@ def _run_transcription_job(job_id, audio_path, transcript_dir, model, device, co
             if not os.path.exists(converted):
                 ffmpeg = shutil.which("ffmpeg")
                 if not ffmpeg:
-                    update(0, "Błąd: ffmpeg nie jest zainstalowany!", 'error')
+                    update(0, "Błąd: ffmpeg nie jest zainstalowany!", "error")
                     return
                 res = subprocess.run(
-                    [ffmpeg, "-y", "-i", audio_path, "-q:a", "0", "-map", "a", converted],
-                    capture_output=True, text=True
+                    [
+                        ffmpeg,
+                        "-y",
+                        "-i",
+                        audio_path,
+                        "-q:a",
+                        "0",
+                        "-map",
+                        "a",
+                        converted,
+                    ],
+                    capture_output=True,
+                    text=True,
                 )
                 if res.returncode != 0:
-                    update(0, f"Błąd konwersji ffmpeg: {res.stderr[:200]}", 'error')
+                    update(0, f"Błąd konwersji ffmpeg: {res.stderr[:200]}", "error")
                     return
             final_audio = converted
             update(10, "Konwersja zakończona")
@@ -2506,18 +3225,24 @@ def _run_transcription_job(job_id, audio_path, transcript_dir, model, device, co
         # Build transcribe command
         script_dir = os.path.dirname(os.path.abspath(__file__))
         transcribe_script = os.path.join(script_dir, "transcribe.py")
-        
+
         # Find python executable (use venv if available)
         venv_python = os.path.join(script_dir, "venv", "bin", "python3")
         python_exe = venv_python if os.path.exists(venv_python) else sys.executable
 
         cmd = [
-            python_exe, transcribe_script,
-            "-i", final_audio,
-            "-m", model,
-            "--device", device,
-            "--compute-type", compute_type,
-            "--batch-size", str(batch_size),
+            python_exe,
+            transcribe_script,
+            "-i",
+            final_audio,
+            "-m",
+            model,
+            "--device",
+            device,
+            "--compute-type",
+            compute_type,
+            "--batch-size",
+            str(batch_size),
         ]
         if min_speakers is not None:
             cmd.extend(["--min-speakers", str(min_speakers)])
@@ -2529,8 +3254,10 @@ def _run_transcription_job(job_id, audio_path, transcript_dir, model, device, co
         update(15, "Uruchamianie transkrypcji WhisperX...")
 
         # Run transcription and parse output for progress
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+
         progress_map = {
             "Ładowanie WhisperX": 20,
             "Wczytywanie pliku audio": 25,
@@ -2551,36 +3278,40 @@ def _run_transcription_job(job_id, audio_path, transcript_dir, model, device, co
 
         while True:
             line = process.stdout.readline()
-            if line == '' and process.poll() is not None:
+            if line == "" and process.poll() is not None:
                 break
             if line:
                 line_stripped = line.strip()
                 for keyword, pct in progress_map.items():
                     if keyword in line_stripped:
                         # Clean ANSI codes for message
-                        clean = re.sub(r'\033\[[0-9;]*m', '', line_stripped)
+                        clean = re.sub(r"\033\[[0-9;]*m", "", line_stripped)
                         update(pct, clean)
                         break
 
         rc = process.poll()
         if rc != 0:
-            update(0, f"Transkrypcja zakończyła się błędem (kod: {rc})", 'error')
+            update(0, f"Transkrypcja zakończyła się błędem (kod: {rc})", "error")
             return
 
         # Success
         json_file = f"{base_name}.json"
         json_path = os.path.join(transcript_dir, json_file)
         if os.path.isfile(json_path):
-            update(100, "Transkrypcja zakończona pomyślnie!", 'done')
+            update(100, "Transkrypcja zakończona pomyślnie!", "done")
             with _job_lock:
-                _transcription_jobs[job_id]['result'] = json_file
+                _transcription_jobs[job_id]["result"] = json_file
         else:
-            update(100, "Transkrypcja zakończona, ale plik JSON nie został znaleziony.", 'done')
+            update(
+                100,
+                "Transkrypcja zakończona, ale plik JSON nie został znaleziony.",
+                "done",
+            )
             with _job_lock:
-                _transcription_jobs[job_id]['result'] = None
+                _transcription_jobs[job_id]["result"] = None
 
     except Exception as e:
-        update(0, f"Nieoczekiwany błąd: {str(e)}", 'error')
+        update(0, f"Nieoczekiwany błąd: {str(e)}", "error")
 
 
 class TranscriptHandler(http.server.BaseHTTPRequestHandler):
@@ -2622,7 +3353,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             job_id = query.get("id", [None])[0]
             self._serve_job_status(job_id)
         elif path.startswith("/audio/"):
-            filename = urllib.parse.unquote(path[7:]) # remove "/audio/"
+            filename = urllib.parse.unquote(path[7:])  # remove "/audio/"
             self._serve_audio(filename)
         else:
             self.send_error(404)
@@ -2645,6 +3376,14 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._save_post_feedback()
         elif path == "/api/upload-transcribe":
             self._upload_and_transcribe()
+        elif path == "/api/transcribe-youtube":
+            self._transcribe_youtube()
+        elif path == "/api/find-speaker":
+            self._find_speaker()
+        elif path == "/api/transcribe-youtube":
+            self._transcribe_youtube()
+        elif path == "/api/find-speaker":
+            self._find_speaker()
         elif path == "/live/start":
             self._live_start()
         elif path == "/live/pause":
@@ -2670,8 +3409,12 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         html = HTML_TEMPLATE
         html = html.replace("%%PAGE_TITLE%%", f"Transkrypcja — {cls.page_title}")
         html = html.replace("%%HEADER_TITLE%%", cls.page_title)
-        html = html.replace("%%TRANSCRIPT_JSON%%", json.dumps(cls.transcript_data, ensure_ascii=False))
-        html = html.replace("%%AUDIO_URL%%", f"/audio/{urllib.parse.quote(audio_filename)}")
+        html = html.replace(
+            "%%TRANSCRIPT_JSON%%", json.dumps(cls.transcript_data, ensure_ascii=False)
+        )
+        html = html.replace(
+            "%%AUDIO_URL%%", f"/audio/{urllib.parse.quote(audio_filename)}"
+        )
         html = html.replace("%%CURRENT_TRANSCRIPT_NAME%%", current_json_name)
 
         payload = html.encode("utf-8")
@@ -2684,6 +3427,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
     # ── Live transcription page ───────────────────────────────────
     def _serve_live_html(self):
         from live_page import LIVE_HTML_TEMPLATE
+
         payload = LIVE_HTML_TEMPLATE.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2700,14 +3444,16 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
                 if f.endswith(".json") and not f.endswith("_state.json"):
                     json_path = os.path.join(cls.transcript_dir, f)
                     audio_path = find_audio_for_json(json_path, cls.transcript_dir)
-                    files.append({
-                        "name": f,
-                        "title": os.path.splitext(f)[0],
-                        "audio": os.path.basename(audio_path) if audio_path else ""
-                    })
+                    files.append(
+                        {
+                            "name": f,
+                            "title": os.path.splitext(f)[0],
+                            "audio": os.path.basename(audio_path) if audio_path else "",
+                        }
+                    )
         # Sort alphabetically by title
         files.sort(key=lambda x: x["title"])
-        
+
         payload = json.dumps(files, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -2721,15 +3467,15 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         if not name or "/" in name or "\\" in name:
             self.send_error(400, "Bad Request")
             return
-        
+
         json_path = os.path.join(cls.transcript_dir, name)
         if not os.path.isfile(json_path):
             self.send_error(404, "Not Found")
             return
-            
+
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            
+
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -2743,7 +3489,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         if not name or "/" in name or "\\" in name:
             self.send_error(400, "Bad Request")
             return
-            
+
         json_path = os.path.join(cls.transcript_dir, name)
         if not os.path.isfile(json_path):
             self.send_error(404, "Not Found")
@@ -2768,7 +3514,9 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             cls.page_title = os.path.splitext(os.path.basename(current_default_json))[0]
             with open(current_default_json, "r", encoding="utf-8") as f:
                 cls.transcript_data = json.load(f)
-            cls.audio_path = find_audio_for_json(current_default_json, cls.transcript_dir)
+            cls.audio_path = find_audio_for_json(
+                current_default_json, cls.transcript_dir
+            )
             if not cls.audio_path:
                 cls.audio_path = find_audio_file(cls.transcript_dir) or ""
         else:
@@ -2806,7 +3554,9 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         cls.transcript_data = {"segments": []}
         cls.audio_path = ""
 
-        payload = json.dumps({"status": "success", "deleted_count": len(deleted)}).encode("utf-8")
+        payload = json.dumps(
+            {"status": "success", "deleted_count": len(deleted)}
+        ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
@@ -2815,7 +3565,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
 
     # ── API: Save post feedback (good/bad examples for learning) ───
     def _save_post_feedback(self):
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
         try:
             params = json.loads(body)
@@ -2823,35 +3573,255 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._json_error(400, "Nieprawidłowe dane JSON.")
             return
 
-        post_text = params.get('text', '').strip()
-        rating = params.get('rating', '')  # 'good' or 'bad'
+        post_text = params.get("text", "").strip()
+        rating = params.get("rating", "")  # 'good' or 'bad'
 
-        if not post_text or rating not in ('good', 'bad'):
+        if not post_text or rating not in ("good", "bad"):
             self._json_error(400, "Wymagane pola: text, rating (good/bad)")
             return
 
         project_dir = os.path.dirname(os.path.abspath(__file__))
-        feedback_path = os.path.join(project_dir, 'posty_feedback.jsonl')
+        feedback_path = os.path.join(project_dir, "posty_feedback.jsonl")
 
-        entry = json.dumps({"text": post_text, "rating": rating, "ts": time.time()}, ensure_ascii=False)
-        with open(feedback_path, 'a', encoding='utf-8') as f:
-            f.write(entry + '\n')
+        entry = json.dumps(
+            {"text": post_text, "rating": rating, "ts": time.time()}, ensure_ascii=False
+        )
+        with open(feedback_path, "a", encoding="utf-8") as f:
+            f.write(entry + "\n")
 
         print(f"\033[92m[+] Feedback zapisany: {rating} — {post_text[:50]}...\033[0m")
-        payload = json.dumps({"status": "ok"}).encode('utf-8')
+        payload = json.dumps({"status": "ok"}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    # ── API: Transcribe from YouTube URL ─────────────────────────
+    def _transcribe_youtube(self):
+        import shutil as shutil_mod
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body) if body else {}
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        youtube_url = params.get('youtube_url', '').strip()
+        if not youtube_url:
+            self._json_error(400, "Wymagany parametr: youtube_url")
+            return
+
+        # Validate URL
+        try:
+            parsed = urllib.parse.urlparse(youtube_url)
+            host = parsed.netloc.lower().lstrip("www.")
+            if host not in ("youtube.com", "youtu.be") or parsed.scheme not in ("http", "https"):
+                raise ValueError()
+        except Exception:
+            self._json_error(400, "Nieprawidłowy URL YouTube. Obsługiwane: youtube.com, youtu.be")
+            return
+
+        # Check yt-dlp availability
+        if not shutil_mod.which("yt-dlp"):
+            self._json_error(503, "yt-dlp nie jest dostępny. Zainstaluj: pip install yt-dlp")
+            return
+
+        # Extract video ID for filename
+        video_id = None
+        if "youtu.be" in parsed.netloc:
+            video_id = parsed.path.lstrip("/").split("/")[0]
+        else:
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "v" in qs:
+                video_id = qs["v"][0]
+            else:
+                parts = [p for p in parsed.path.split("/") if p]
+                if len(parts) >= 2 and parts[-2] in ("shorts", "embed"):
+                    video_id = parts[-1]
+        if not video_id:
+            video_id = re.sub(r"[^\w\-]", "_", parsed.path)[:20]
+        base_name = re.sub(r"[^A-Za-z0-9_\-]", "", video_id)[:11]
+
+        cls = self.__class__
+        dest_path = os.path.join(cls.transcript_dir, f"{base_name}.mp3")
+
+        # Download audio via yt-dlp
+        print(f"\033[94m[YT] Pobieranie audio: {youtube_url} → {dest_path}\033[0m")
+        try:
+            result = subprocess.run(
+                ["yt-dlp", "-x", "--audio-format", "mp3", "-o", dest_path, youtube_url],
+                capture_output=True, text=True, timeout=300
+            )
+            if result.returncode != 0:
+                self._json_error(502, f"yt-dlp zakończył się błędem: {result.stderr[:200]}")
+                return
+        except subprocess.TimeoutExpired:
+            self._json_error(502, "yt-dlp timeout (300s)")
+            return
+        except Exception as e:
+            self._json_error(500, f"Błąd: {e}")
+            return
+
+        # Start transcription job (reuse existing pipeline)
+        model = params.get('model', 'medium')
+        device = params.get('device', 'cuda')
+        compute_type = params.get('compute_type', 'float16')
+        batch_size = int(params.get('batch_size', 4))
+        min_speakers = params.get('min_speakers')
+        max_speakers = params.get('max_speakers')
+        use_ollama = params.get('use_ollama', True)
+
+        job_id = f"job_{int(time.time() * 1000)}"
+        with _job_lock:
+            _transcription_jobs[job_id] = {
+                'status': 'running', 'progress': 5,
+                'message': 'Audio pobrane z YouTube, uruchamianie transkrypcji...',
+                'result': None
+            }
+
+        t = threading.Thread(
+            target=_run_transcription_job,
+            args=(job_id, dest_path, cls.transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama),
+            daemon=True
+        )
+        t.start()
+
+        payload = json.dumps({"job_id": job_id, "base_name": base_name}).encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
-    # ── API: Generate posts via Ollama ─────────────────────────────
-    def _generate_posts(self):
+    # ── API: Find speaker in transcript ────────────────────────────
+    def _find_speaker(self):
         if not http_requests:
-            self._json_error(500, "Biblioteka 'requests' nie jest zainstalowana w środowisku.")
+            self._json_error(500, "Brak biblioteki requests.")
             return
 
         content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body) if body else {}
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        transcript_name = params.get('transcript_name', '').strip()
+        person_name = params.get('person_name', '').strip()
+
+        if not transcript_name or not person_name:
+            self._json_error(400, "Wymagane parametry: transcript_name, person_name")
+            return
+        if "/" in transcript_name or "\\" in transcript_name:
+            self._json_error(400, "Bad Request")
+            return
+
+        cls = self.__class__
+        json_path = os.path.join(cls.transcript_dir, transcript_name)
+        if not os.path.isfile(json_path):
+            self._json_error(404, f"Nie znaleziono transkrypcji: {transcript_name}")
+            return
+
+        # Load transcript and build text with speaker labels
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        transcript_lines = []
+        for seg in data.get('segments', []):
+            spk = seg.get('speaker', 'UNKNOWN')
+            text = seg.get('text', '').strip()
+            if text:
+                transcript_lines.append(f"[{spk}] {text}")
+        transcript_text = '\n'.join(transcript_lines)
+
+        if not transcript_text:
+            self._json_ok({"found": False, "speaker_id": None, "confidence": 0, "fragment": ""})
+            return
+
+        # Build prompt for Ollama
+        system_prompt = f"""Jesteś ekspertem analizy transkrypcji audio z języka polskiego.
+Twoje zadanie: zidentyfikować, który SPEAKER_XX w transkrypcji to wskazana osoba.
+
+ZASADY DOPASOWANIA — szukaj fonetycznych wariantów imienia:
+- Polskie imiona mogą być przekręcone przez ASR (np. "Tomasz" → "Tomas", "Tomaś")
+- Odmiana przez przypadki (np. "Tomasza", "Tomaszowi", "Tomku")
+- Zdrobnienia i formy potoczne (np. "Tomek" dla "Tomasz")
+- Błędy transkrypcji: podwojone litery, zamiana sz/ś/s, cz/ć/c, rz/ż/rz
+- Szukaj też formy "Panie/Pani [Imię]" lub samego nazwiska
+
+ODPOWIEDŹ (tylko JSON, bez markdown, bez komentarzy):
+{{"found": true/false, "speaker_id": "SPEAKER_XX" lub null, "confidence": 0-100, "fragment": "dosłowny cytat z transkrypcji gdzie padło imię (max 200 znaków)"}}
+
+Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "speaker_id": null, "confidence": 0, "fragment": ""}}"""
+
+        user_prompt = f"Szukaj osoby: {person_name}\n\nTranskrypcja:\n{transcript_text[:8000]}"
+
+        ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+        ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
+
+        print(f"\033[94m[SF] Szukam mówcy \"{person_name}\" w transkrypcji {transcript_name}...\033[0m")
+
+        try:
+            resp = http_requests.post(
+                f"{ollama_url}/api/chat",
+                json={
+                    "model": ollama_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0.0}
+                },
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                self._json_error(502, f"Ollama błąd HTTP {resp.status_code}")
+                return
+
+            llm_text = resp.json().get('message', {}).get('content', '').strip()
+            result = self._parse_speaker_finder_response(llm_text)
+            print(f"\033[92m[SF] Wynik: {result.get('speaker_id')}, pewność: {result.get('confidence')}%\033[0m")
+            self._json_ok(result)
+
+        except http_requests.exceptions.ConnectionError:
+            self._json_error(502, f"Nie można połączyć się z Ollama ({ollama_url}).")
+        except http_requests.exceptions.Timeout:
+            self._json_error(504, "Ollama nie odpowiedziała w czasie (timeout 120s).")
+        except Exception as e:
+            self._json_error(500, f"Błąd: {e}")
+
+    @staticmethod
+    def _parse_speaker_finder_response(llm_text):
+        """Parse LLM response for speaker finder. Always returns complete schema."""
+        fallback = {"found": False, "speaker_id": None, "confidence": 0, "fragment": ""}
+        try:
+            # Remove markdown fences if present
+            cleaned = re.sub(r'```(?:json)?\s*', '', llm_text).strip().rstrip('`')
+            data = json.loads(cleaned)
+            found = bool(data.get('found', False))
+            speaker_id = data.get('speaker_id')
+            if speaker_id and not re.match(r'SPEAKER_\d+', str(speaker_id)):
+                speaker_id = None
+            confidence = int(data.get('confidence', 0))
+            confidence = max(0, min(100, confidence))
+            fragment = str(data.get('fragment', ''))[:500]
+            return {"found": found, "speaker_id": speaker_id, "confidence": confidence, "fragment": fragment}
+        except Exception:
+            return fallback
+
+    # ── API: Generate posts via Ollama ─────────────────────────────
+    def _generate_posts(self):
+        if not http_requests:
+            self._json_error(
+                500, "Biblioteka 'requests' nie jest zainstalowana w środowisku."
+            )
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
         try:
             params = json.loads(body)
@@ -2860,13 +3830,14 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             return
 
         cls = self.__class__
-        transcript_name = params.get('transcript_name', '')
-        osoba = params.get('osoba', 'Dorota Spyrka')
-        username = params.get('username', '@dorota_spyrka')
-        program = params.get('program', '@OficjalneZero')
-        num_posts = params.get('num_posts', 5)
-        speaker_filter = params.get('speaker_filter', '')
-        speaker_text = params.get('speaker_text', '')
+        transcript_name = params.get("transcript_name", "")
+        osoba = params.get("osoba", "Dorota Spyrka")
+        username = params.get("username", "@dorota_spyrka")
+        program = params.get("program", "@OficjalneZero")
+        num_posts = params.get("num_posts", 5)
+        temperature = float(params.get("temperature", 0.0))
+        speaker_filter = params.get("speaker_filter", "")
+        speaker_text = params.get("speaker_text", "")
 
         # Load transcript text
         base = os.path.splitext(transcript_name)[0]
@@ -2875,7 +3846,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._json_error(404, f"Nie znaleziono pliku transkrypcji: {base}.txt")
             return
 
-        with open(txt_path, 'r', encoding='utf-8') as f:
+        with open(txt_path, "r", encoding="utf-8") as f:
             transcript_text = f.read().strip()
 
         # Jeśli wybrany mówca i dostarczony tekst filtrowany — użyj go
@@ -2885,24 +3856,24 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         # Load example posts
         example_posts = ""
         project_dir = os.path.dirname(os.path.abspath(__file__))
-        posty_path = os.path.join(project_dir, 'posty.txt')
+        posty_path = os.path.join(project_dir, "posty.txt")
         if os.path.isfile(posty_path):
-            with open(posty_path, 'r', encoding='utf-8') as f:
+            with open(posty_path, "r", encoding="utf-8") as f:
                 example_posts = f.read().strip()
 
         # Load feedback examples (good/bad posts for learning)
         good_examples = []
         bad_examples = []
-        feedback_path = os.path.join(project_dir, 'posty_feedback.jsonl')
+        feedback_path = os.path.join(project_dir, "posty_feedback.jsonl")
         if os.path.isfile(feedback_path):
-            with open(feedback_path, 'r', encoding='utf-8') as f:
+            with open(feedback_path, "r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())
-                        if entry.get('rating') == 'good':
-                            good_examples.append(entry['text'])
-                        elif entry.get('rating') == 'bad':
-                            bad_examples.append(entry['text'])
+                        if entry.get("rating") == "good":
+                            good_examples.append(entry["text"])
+                        elif entry.get("rating") == "bad":
+                            bad_examples.append(entry["text"])
                     except Exception:
                         pass
             good_examples = good_examples[-5:]
@@ -2934,11 +3905,11 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         # ──────────────────────────────────────────────────────────────
 
         # Wyczyść tekst z timestampów i oznaczeń mówców
-        clean_text = re.sub(r'\[\d+:\d+:\d+\]\s*SPEAKER_\d+:', '', transcript_text)
-        clean_text = re.sub(r'\n\s*\n', '\n', clean_text).strip()
+        clean_text = re.sub(r"\[\d+:\d+:\d+\]\s*SPEAKER_\d+:", "", transcript_text)
+        clean_text = re.sub(r"\n\s*\n", "\n", clean_text).strip()
 
         # Podziel na zdania
-        sentences = re.split(r'(?<=[.!?])\s+', clean_text)
+        sentences = re.split(r"(?<=[.!?])\s+", clean_text)
         sentences = [s.strip() for s in sentences if len(s.strip()) > 25]
 
         # Zgrupuj w bloki po 3-4 zdania (każdy blok = 1 post)
@@ -2946,7 +3917,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         i = 0
         while i < len(sentences):
             chunk_size = min(4, len(sentences) - i)
-            block = ' '.join(sentences[i:i+chunk_size])
+            block = " ".join(sentences[i : i + chunk_size])
             if len(block) > 60:
                 blocks.append(block)
             i += chunk_size
@@ -2963,12 +3934,12 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         for i, block in enumerate(selected, 1):
             blocks_text += f"\n[BLOK {i}]: {block}\n"
 
-        system_prompt = f"""Jesteś redaktorem postów. Dostajesz GOTOWE fragmenty tekstu. 
+        system_prompt = f"""Jesteś redaktorem postów. Dostajesz GOTOWE fragmenty tekstu.
 Twoje JEDYNE zadanie:
 1. Usuń jąknięcia (yyy, eee, uhm) i urwane słowa/zdania.
-2. Na początku dodaj: 💬{username} w {program}:
-3. Na końcu dodaj: #RAZEMwMEDIACH
-4. Przed szczególnie mocnym zdaniem możesz dodać ‼️
+2. Na samym początku dodaj nagłówek w osobnym wierszu: 💬 {username} w {program}:
+3. Po tym nagłówku dodaj pusty wiersz (znaki nowej linii), tak aby cytat zaczynał się w kolejnym wierszu.
+4. Po cytacie dodaj kolejny pusty wiersz (znaki nowej linii) i w ostatnim wierszu wstaw hashtag: #RAZEMwMEDIACH
 
 ABSOLUTNE ZAKAZY:
 - NIE zmieniaj słów! Kopiuj DOSŁOWNIE (minus jąknięcia).
@@ -2977,91 +3948,94 @@ ABSOLUTNE ZAKAZY:
 - NIE skracaj — przepisz cały blok!
 - Jeśli zdanie jest urwane — po prostu je pomiń.
 
-Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
+Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_section}{feedback_section}"""
 
         prompt = f"Oto {len(selected)} bloków do przetworzenia na posty. Przepisz każdy blok DOSŁOWNIE, dodając tylko nagłówek i hashtag:\n{blocks_text}"
 
-        ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
-        ollama_model = os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
         try:
-            print(f"\033[94m[-] Generowanie {num_posts} postów (model: {ollama_model})...\033[0m")
+            print(
+                f"\033[94m[-] Generowanie {num_posts} postów (model: {ollama_model}, temp: {temperature})...\033[0m"
+            )
             resp = http_requests.post(
                 f"{ollama_url}/api/chat",
                 json={
                     "model": ollama_model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": prompt},
                     ],
                     "stream": False,
-                    "options": {
-                        "temperature": 0.0
-                    }
+                    "options": {"temperature": temperature},
                 },
                 timeout=300,
             )
             if resp.status_code != 200:
-                self._json_error(502, f"Ollama zwróciła błąd HTTP {resp.status_code}: {resp.text[:200]}")
+                self._json_error(
+                    502,
+                    f"Ollama zwróciła błąd HTTP {resp.status_code}: {resp.text[:200]}",
+                )
                 return
 
-            result_text = resp.json().get('message', {}).get('content', '').strip()
+            result_text = resp.json().get("message", {}).get("content", "").strip()
             print(f"\033[92m[+] Wygenerowano posty pomyślnie.\033[0m")
 
             # Parsowanie odpowiedzi i dodanie źródeł z oryginalnych bloków
             posts_with_sources = self._parse_posts_with_sources(result_text)
-            
+
             # Dodaj źródła — każdy post odpowiada blokowi, którego jest przepisaniem
             for i, post in enumerate(posts_with_sources):
                 if i < len(selected):
                     post["sources"] = [selected[i]]
 
-            payload = json.dumps({"posts": posts_with_sources}, ensure_ascii=False).encode('utf-8')
+            payload = json.dumps(
+                {"posts": posts_with_sources}, ensure_ascii=False
+            ).encode("utf-8")
             self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', str(len(payload)))
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
         except http_requests.exceptions.ConnectionError:
-            self._json_error(502, f"Nie można połączyć się z Ollama ({ollama_url}). Sprawdź, czy jest uruchomiona.")
+            self._json_error(
+                502,
+                f"Nie można połączyć się z Ollama ({ollama_url}). Sprawdź, czy jest uruchomiona.",
+            )
         except Exception as e:
             self._json_error(500, f"Błąd: {str(e)}")
 
     @staticmethod
     def _parse_posts_with_sources(text):
-        """Parsuje odpowiedź AI na posty. Każdy post zaczyna się od 💬."""
+        """Parsuje odpowiedź AI na posty. Każdy post zaczyna się od 💬. Odrzuca artefakty."""
         posts = []
-        
+
         # Usuń [ŹRÓDŁO:...] tagi i linie z samymi myślnikami
-        text = re.sub(r'\[ŹRÓDŁO:.*?\]', '', text, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r'^-{3,}$', '', text, flags=re.MULTILINE)
-        text = re.sub(r'^\[BLOK \d+\]:?\s*', '', text, flags=re.MULTILINE)
-        
+        text = re.sub(r"\[ŹRÓDŁO:.*?\]", "", text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r"^-{3,}$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\[BLOK \d+\]:?\s*", "", text, flags=re.MULTILINE)
+
         # Rozdziel po 💬 — każdy post zaczyna się od tego emoji
-        parts = re.split(r'(?=💬)', text)
-        
+        parts = re.split(r"(?=💬)", text)
+
         for part in parts:
             part = part.strip()
             if not part or len(part) < 20:
                 continue
-            # Wyczyść podwójne nowe linie wewnątrz posta (zachowaj jako spację)
-            cleaned = re.sub(r'\n{2,}', '\n', part).strip()
+            if not part.startswith("💬"):
+                # Artefakt — loguj i odrzuć
+                print(f"\033[90m[ARTIFACT] Odrzucony blok: {part[:80]!r}\033[0m")
+                continue
+            cleaned = re.sub(r"\n{3,}", "\n\n", part).strip()
             if cleaned:
                 posts.append({"text": cleaned, "sources": []})
-        
-        # Fallback — jeśli nie znaleziono 💬, rozdziel po podwójnej nowej linii
-        if not posts:
-            raw_posts = re.split(r'\n\n+', text.strip())
-            for p in raw_posts:
-                p = p.strip()
-                if p and len(p) > 20:
-                    posts.append({"text": p, "sources": []})
-        
+
         return posts
 
     # ── API: Save posts to file ────────────────────────────────────
     def _save_posts(self):
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
         try:
             params = json.loads(body)
@@ -3070,147 +4044,168 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
             return
 
         cls = self.__class__
-        transcript_name = params.get('transcript_name', '')
-        posts = params.get('posts', [])
+        transcript_name = params.get("transcript_name", "")
+        posts = params.get("posts", [])
 
         base = os.path.splitext(transcript_name)[0]
         output_path = os.path.join(cls.transcript_dir, f"{base}_posty.txt")
 
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write('\n\n---\n\n'.join(posts))
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n\n---\n\n".join(posts))
 
         print(f"\033[92m[+] Zapisano {len(posts)} postów do: {output_path}\033[0m")
 
-        payload = json.dumps({"status": "success", "path": output_path}).encode('utf-8')
+        payload = json.dumps({"status": "success", "path": output_path}).encode("utf-8")
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
     # ── Helper: JSON error response ────────────────────────────────
     def _json_error(self, code, message):
-        payload = json.dumps({"error": message}).encode('utf-8')
+        payload = json.dumps({"error": message}).encode("utf-8")
         self.send_response(code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
     # ── API: Upload file and start transcription ───────────────────
     def _upload_and_transcribe(self):
         cls = self.__class__
-        content_type = self.headers.get('Content-Type', '')
+        content_type = self.headers.get("Content-Type", "")
 
-        if 'multipart/form-data' not in content_type:
+        if "multipart/form-data" not in content_type:
             self._json_error(400, "Wymagany Content-Type: multipart/form-data")
             return
 
         # Parse boundary
         boundary = None
-        for part in content_type.split(';'):
+        for part in content_type.split(";"):
             part = part.strip()
-            if part.startswith('boundary='):
+            if part.startswith("boundary="):
                 boundary = part[9:].strip('"')
                 break
         if not boundary:
             self._json_error(400, "Brak boundary w Content-Type")
             return
 
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
 
         # Parse multipart form data
         boundary_bytes = boundary.encode()
-        parts = body.split(b'--' + boundary_bytes)
+        parts = body.split(b"--" + boundary_bytes)
 
         file_data = None
         file_name = None
-        model = 'medium'
-        device = 'cuda'
-        compute_type = 'float16'
+        model = "medium"
+        device = "cuda"
+        compute_type = "float16"
         batch_size = 4
         min_speakers = None
         max_speakers = None
         use_ollama = True
 
         for part in parts:
-            if b'Content-Disposition' not in part:
+            if b"Content-Disposition" not in part:
                 continue
             # Split headers from content
-            header_end = part.find(b'\r\n\r\n')
+            header_end = part.find(b"\r\n\r\n")
             if header_end == -1:
                 continue
-            headers_raw = part[:header_end].decode('utf-8', errors='replace')
-            content = part[header_end + 4:]
+            headers_raw = part[:header_end].decode("utf-8", errors="replace")
+            content = part[header_end + 4 :]
             # Remove trailing \r\n
-            if content.endswith(b'\r\n'):
+            if content.endswith(b"\r\n"):
                 content = content[:-2]
 
             # Parse Content-Disposition
             name = None
             filename = None
-            for line in headers_raw.split('\r\n'):
-                if 'Content-Disposition' in line:
-                    for item in line.split(';'):
+            for line in headers_raw.split("\r\n"):
+                if "Content-Disposition" in line:
+                    for item in line.split(";"):
                         item = item.strip()
-                        if item.startswith('name='):
+                        if item.startswith("name="):
                             name = item[5:].strip('"')
-                        elif item.startswith('filename='):
+                        elif item.startswith("filename="):
                             filename = item[9:].strip('"')
 
-            if name == 'file' and filename:
+            if name == "file" and filename:
                 file_data = content
                 file_name = filename
-            elif name == 'model':
+            elif name == "model":
                 model = content.decode().strip()
-            elif name == 'device':
+            elif name == "device":
                 device = content.decode().strip()
-            elif name == 'compute_type':
+            elif name == "compute_type":
                 compute_type = content.decode().strip()
-            elif name == 'batch_size':
-                try: batch_size = int(content.decode().strip())
-                except: pass
-            elif name == 'min_speakers':
-                try: min_speakers = int(content.decode().strip()) if content.strip() else None
-                except: pass
-            elif name == 'max_speakers':
-                try: max_speakers = int(content.decode().strip()) if content.strip() else None
-                except: pass
-            elif name == 'use_ollama':
-                use_ollama = content.decode().strip().lower() in ('true', '1', 'yes')
+            elif name == "batch_size":
+                try:
+                    batch_size = int(content.decode().strip())
+                except:
+                    pass
+            elif name == "min_speakers":
+                try:
+                    min_speakers = (
+                        int(content.decode().strip()) if content.strip() else None
+                    )
+                except:
+                    pass
+            elif name == "max_speakers":
+                try:
+                    max_speakers = (
+                        int(content.decode().strip()) if content.strip() else None
+                    )
+                except:
+                    pass
+            elif name == "use_ollama":
+                use_ollama = content.decode().strip().lower() in ("true", "1", "yes")
 
         if not file_data or not file_name:
             self._json_error(400, "Nie przesłano pliku audio/wideo.")
             return
 
         # Save uploaded file to transcript dir
-        safe_name = re.sub(r'[^\w\-.]', '_', file_name)
+        safe_name = re.sub(r"[^\w\-.]", "_", file_name)
         upload_path = os.path.join(cls.transcript_dir, safe_name)
-        with open(upload_path, 'wb') as f:
+        with open(upload_path, "wb") as f:
             f.write(file_data)
 
         # Start background transcription
         job_id = f"job_{int(time.time() * 1000)}"
         with _job_lock:
             _transcription_jobs[job_id] = {
-                'status': 'running',
-                'progress': 0,
-                'message': 'Przesyłanie pliku zakończone, uruchamianie...',
-                'result': None
+                "status": "running",
+                "progress": 0,
+                "message": "Przesyłanie pliku zakończone, uruchamianie...",
+                "result": None,
             }
 
         t = threading.Thread(
             target=_run_transcription_job,
-            args=(job_id, upload_path, cls.transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama),
-            daemon=True
+            args=(
+                job_id,
+                upload_path,
+                cls.transcript_dir,
+                model,
+                device,
+                compute_type,
+                batch_size,
+                min_speakers,
+                max_speakers,
+                use_ollama,
+            ),
+            daemon=True,
         )
         t.start()
 
-        payload = json.dumps({"job_id": job_id}).encode('utf-8')
+        payload = json.dumps({"job_id": job_id}).encode("utf-8")
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
@@ -3227,22 +4222,364 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
             self._json_error(404, "Nie znaleziono zadania o podanym ID.")
             return
 
-        payload = json.dumps(job, ensure_ascii=False).encode('utf-8')
+        payload = json.dumps(job, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    # ── YouTube URL helpers ────────────────────────────────────────
+    @staticmethod
+    def _is_valid_youtube_url(url: str) -> bool:
+        """Returns True if url points to youtube.com or youtu.be domain."""
+        try:
+            parsed = urllib.parse.urlparse(url)
+            host = parsed.netloc.lower()
+            if host.startswith("www."):
+                host = host[4:]
+            return host in ("youtube.com", "youtu.be") and parsed.scheme in (
+                "http",
+                "https",
+            )
+        except Exception:
+            return False
+
+    @staticmethod
+    def _extract_youtube_video_id(url: str) -> str:
+        """
+        Extracts the video ID from YouTube URL.
+        Sanitizes by removing chars outside [A-Za-z0-9_-], truncates to 11 chars.
+        Falls back to sanitized URL path fragment.
+        """
+        parsed = urllib.parse.urlparse(url)
+        video_id = None
+
+        if "youtu.be" in parsed.netloc:
+            video_id = parsed.path.lstrip("/").split("/")[0]
+        else:
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "v" in qs:
+                video_id = qs["v"][0]
+            else:
+                parts = [p for p in parsed.path.split("/") if p]
+                if len(parts) >= 2 and parts[-2] in ("shorts", "embed"):
+                    video_id = parts[-1]
+
+        if not video_id:
+            video_id = re.sub(r"[^\w\-]", "_", parsed.path)[:40]
+
+        return re.sub(r"[^A-Za-z0-9_\-]", "", video_id)[:11]
+
+    # ── API: Transcribe from YouTube URL ─────────────────────────────
+    def _transcribe_youtube(self):
+        """
+        Downloads audio from YouTube via yt-dlp and runs the WhisperX pipeline.
+        POST /api/transcribe-youtube
+        """
+        import shutil as _shutil
+
+        cls = self.__class__
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        youtube_url = params.get("youtube_url", "").strip()
+        if not youtube_url:
+            self._json_error(400, "Brak parametru youtube_url.")
+            return
+
+        if not self._is_valid_youtube_url(youtube_url):
+            self._json_error(
+                400,
+                "Nieprawidłowy URL YouTube. Dozwolone domeny: youtube.com, youtu.be.",
+            )
+            return
+
+        if not _shutil.which("yt-dlp"):
+            self._json_error(
+                503,
+                "yt-dlp nie jest zainstalowany lub niedostępny w PATH. Zainstaluj: pip install yt-dlp",
+            )
+            return
+
+        video_id = self._extract_youtube_video_id(youtube_url) or "yt_audio"
+        model = params.get("model", "medium")
+        device = params.get("device", "cuda")
+        compute_type = params.get("compute_type", "float16")
+        batch_size = int(params.get("batch_size", 4))
+        min_speakers = params.get("min_speakers") or None
+        max_speakers = params.get("max_speakers") or None
+        use_ollama = bool(params.get("use_ollama", True))
+
+        # yt-dlp output template: video_id.%(ext)s  → results in video_id.mp3
+        dest_template = os.path.join(cls.transcript_dir, f"{video_id}.%(ext)s")
+
+        print(f"\033[94m[-] Pobieranie audio z YouTube: {youtube_url}\033[0m")
+        try:
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "-x",
+                    "--audio-format",
+                    "mp3",
+                    "-o",
+                    dest_template,
+                    youtube_url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except FileNotFoundError:
+            self._json_error(503, "yt-dlp nie jest dostępny w PATH.")
+            return
+        except subprocess.TimeoutExpired:
+            self._json_error(502, "yt-dlp przekroczył limit czasu (300s).")
+            return
+        except Exception as e:
+            self._json_error(500, f"Błąd podczas uruchamiania yt-dlp: {str(e)}")
+            return
+
+        if result.returncode != 0:
+            stderr_preview = result.stderr[:200] if result.stderr else "(brak stderr)"
+            self._json_error(
+                502,
+                f"yt-dlp zakończył się błędem (kod {result.returncode}): {stderr_preview}",
+            )
+            return
+
+        actual_path = os.path.join(cls.transcript_dir, f"{video_id}.mp3")
+        print(f"\033[92m[+] Pobrano audio: {actual_path}\033[0m")
+
+        job_id = f"job_{int(time.time() * 1000)}"
+        with _job_lock:
+            _transcription_jobs[job_id] = {
+                "status": "running",
+                "progress": 10,
+                "message": "Audio pobrane z YouTube, uruchamianie transkrypcji...",
+                "result": None,
+            }
+
+        t = threading.Thread(
+            target=_run_transcription_job,
+            args=(
+                job_id,
+                actual_path,
+                cls.transcript_dir,
+                model,
+                device,
+                compute_type,
+                batch_size,
+                min_speakers,
+                max_speakers,
+                use_ollama,
+            ),
+            daemon=True,
+        )
+        t.start()
+        self._json_ok({"job_id": job_id})
+
+    # ── Speaker Finder helpers ────────────────────────────────────────
+    @staticmethod
+    def _build_speaker_finder_prompt(person_name: str, transcript_text: str):
+        """Returns (system_prompt, user_prompt) tuple for speaker identification."""
+        system_prompt = (
+            "Jesteś ekspertem analizy transkrypcji audio z języka polskiego.\n"
+            "Twoje zadanie: zidentyfikować, który SPEAKER_XX w transkrypcji to wskazana osoba.\n\n"
+            "ZASADY DOPASOWANIA — szukaj fonetycznych wariantów imienia:\n"
+            '- Polskie imiona mogą być przekręcone przez ASR (np. "Tomasz" → "Tomas", "Tomaś")\n'
+            '- Odmiana przez przypadki (np. "Tomasza", "Tomaszowi", "Tomku")\n'
+            '- Zdrobnienia i formy potoczne (np. "Tomek" dla "Tomasz")\n'
+            "- Błędy transkrypcji: podwojone litery, zamiana sz/ś/s, cz/ć/c, rz/ż/rz\n"
+            '- Szukaj też formy "Panie/Pani [Imię]" lub samego nazwiska\n\n'
+            "ODPOWIEDŹ (tylko JSON, bez markdown, bez komentarzy):\n"
+            "{\n"
+            '  "found": true/false,\n'
+            '  "speaker_id": "SPEAKER_XX" lub null,\n'
+            '  "confidence": 0-100,\n'
+            '  "fragment": "dosłowny cytat z transkrypcji gdzie padło imię (max 200 znaków)"\n'
+            "}\n\n"
+            'Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {"found": false, ...}'
+        )
+        user_prompt = f"Szukaj osoby: {person_name}\n\nTranskrypcja:\n{transcript_text}"
+        return system_prompt, user_prompt
+
+    @staticmethod
+    def _parse_speaker_finder_response(llm_text: str) -> dict:
+        """
+        Parses LLM response into a speaker finder result dict.
+        Handles JSON wrapped in markdown fences.
+        Returns fallback {found: False, ...} on parse error.
+        """
+        fallback = {"found": False, "speaker_id": None, "confidence": 0, "fragment": ""}
+        try:
+            text = llm_text.strip()
+            # Strip markdown fence
+            if text.startswith("```"):
+                lines = [l for l in text.split("\n") if not l.startswith("```")]
+                text = "\n".join(lines).strip()
+
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start == -1 or end == 0:
+                return fallback
+
+            data = json.loads(text[start:end])
+            found = bool(data.get("found", False))
+            speaker_id = data.get("speaker_id")
+            confidence = data.get("confidence", 0)
+            fragment = data.get("fragment", "")
+
+            # Validate speaker_id format
+            if speaker_id is not None:
+                if not re.match(r"SPEAKER_\d+", str(speaker_id)):
+                    speaker_id = None
+                    found = False
+
+            try:
+                confidence = max(0, min(100, int(confidence)))
+            except (ValueError, TypeError):
+                confidence = 0
+
+            fragment = str(fragment)[:500] if fragment else ""
+
+            if not found:
+                return fallback
+
+            return {
+                "found": True,
+                "speaker_id": str(speaker_id),
+                "confidence": confidence,
+                "fragment": fragment,
+            }
+        except Exception:
+            return fallback
+
+    # ── API: Find speaker in transcript ──────────────────────────────
+    def _find_speaker(self):
+        """
+        Identifies which SPEAKER_XX corresponds to person_name using Ollama.
+        POST /api/find-speaker
+        """
+        if not http_requests:
+            self._json_error(500, "Biblioteka 'requests' nie jest zainstalowana.")
+            return
+
+        cls = self.__class__
+        fallback = {"found": False, "speaker_id": None, "confidence": 0, "fragment": ""}
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        transcript_name = params.get("transcript_name", "").strip()
+        person_name = params.get("person_name", "").strip()
+
+        if not transcript_name or not person_name:
+            self._json_error(400, "Wymagane parametry: transcript_name, person_name.")
+            return
+
+        if "/" in transcript_name or "\\" in transcript_name:
+            self._json_error(
+                400, "Nieprawidłowa nazwa transkrypcji (niedozwolone znaki)."
+            )
+            return
+
+        transcript_path = os.path.join(cls.transcript_dir, transcript_name)
+        if not os.path.isfile(transcript_path):
+            self._json_error(
+                404, f"Nie znaleziono pliku transkrypcji: {transcript_name}"
+            )
+            return
+
+        try:
+            with open(transcript_path, "r", encoding="utf-8") as f:
+                transcript_data = json.load(f)
+        except Exception as e:
+            self._json_error(500, f"Błąd odczytu transkrypcji: {str(e)}")
+            return
+
+        # Build labeled transcript text
+        segments = transcript_data.get("segments", [])
+        transcript_text = ""
+        for seg in segments:
+            speaker = seg.get("speaker", "UNKNOWN")
+            text = seg.get("text", "") or " ".join(
+                w.get("word", "") for w in seg.get("words", [])
+            )
+            if text.strip():
+                transcript_text += f"[{speaker}] {text.strip()}\n"
+
+        if not transcript_text.strip():
+            self._json_ok(fallback)
+            return
+
+        system_prompt, user_prompt = self._build_speaker_finder_prompt(
+            person_name, transcript_text
+        )
+
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+        print(
+            f"\033[94m[-] Szukam mówcy '{person_name}' w transkrypcji {transcript_name}...\033[0m"
+        )
+        try:
+            resp = http_requests.post(
+                f"{ollama_url}/api/chat",
+                json={
+                    "model": ollama_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0.0},
+                },
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                print(f"\033[91m[!] Ollama zwróciła HTTP {resp.status_code}\033[0m")
+                self._json_ok(fallback)
+                return
+
+            llm_text = resp.json().get("message", {}).get("content", "")
+            result = self._parse_speaker_finder_response(llm_text)
+            print(
+                f"\033[92m[+] Speaker Finder: found={result['found']}, "
+                f"speaker_id={result.get('speaker_id')}, "
+                f"confidence={result.get('confidence')}\033[0m"
+            )
+            self._json_ok(result)
+
+        except http_requests.exceptions.ConnectionError:
+            print(f"\033[91m[!] Nie można połączyć się z Ollama\033[0m")
+            self._json_ok(fallback)
+        except Exception as e:
+            print(f"\033[91m[!] Błąd Speaker Finder: {str(e)}\033[0m")
+            self._json_ok(fallback)
 
     # ── Live Transcription Handlers ────────────────────────────────
     def _serve_live_sources(self):
         from live_transcriber import list_audio_sources
+
         sources = list_audio_sources()
-        data = [{"id": s.id, "name": s.name, "media_name": s.media_name} for s in sources]
-        payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        data = [
+            {"id": s.id, "name": s.name, "media_name": s.media_name} for s in sources
+        ]
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
@@ -3254,7 +4591,8 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
         source_id = query.get("source_id", [None])[0]
 
         # If session active, use session's capture buffer
-        from live_transcriber import get_session_manager, CaptureEngine
+        from live_transcriber import CaptureEngine, get_session_manager
+
         sm = get_session_manager(self.__class__.transcript_dir)
 
         if not source_id and sm._capture and sm._capture.is_source_alive:
@@ -3267,10 +4605,16 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
         # Spawn a separate parec for preview with low latency
         try:
             proc = subprocess.Popen(
-                ["parec", "--format=s16le", "--rate=16000", "--channels=1",
-                 "--latency-msec=50",
-                 f"--monitor-stream={source_id}"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                [
+                    "parec",
+                    "--format=s16le",
+                    "--rate=16000",
+                    "--channels=1",
+                    "--latency-msec=50",
+                    f"--monitor-stream={source_id}",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
             )
         except Exception as e:
             self._json_error(500, f"Nie można uruchomić parec: {e}")
@@ -3278,16 +4622,17 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
 
         # Stream as WAV
         self.send_response(200)
-        self.send_header('Content-Type', 'audio/wav')
-        self.send_header('Cache-Control', 'no-cache')
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
 
         # WAV header with large data size for streaming
         import struct as struct_mod
+
         data_size = 0x7FFFFFFF
-        header = struct_mod.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
-        header += struct_mod.pack('<4sIHHIIHH', b'fmt ', 16, 1, 1, 16000, 32000, 2, 16)
-        header += struct_mod.pack('<4sI', b'data', data_size)
+        header = struct_mod.pack("<4sI4s", b"RIFF", 36 + data_size, b"WAVE")
+        header += struct_mod.pack("<4sIHHIIHH", b"fmt ", 16, 1, 1, 16000, 32000, 2, 16)
+        header += struct_mod.pack("<4sI", b"data", data_size)
 
         try:
             self.wfile.write(header)
@@ -3314,24 +4659,26 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
 
     def _serve_live_status(self):
         from live_transcriber import get_session_manager
+
         sm = get_session_manager(self.__class__.transcript_dir)
-        payload = json.dumps(sm.get_status(), ensure_ascii=False).encode('utf-8')
+        payload = json.dumps(sm.get_status(), ensure_ascii=False).encode("utf-8")
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
     def _serve_live_events(self):
         """SSE endpoint — streams events from the session manager."""
         from live_transcriber import get_session_manager
+
         sm = get_session_manager(self.__class__.transcript_dir)
 
         self.send_response(200)
-        self.send_header('Content-Type', 'text/event-stream')
-        self.send_header('Cache-Control', 'no-cache')
-        self.send_header('Connection', 'keep-alive')
-        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
         try:
@@ -3341,7 +4688,7 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
                     event_type = event.get("event", "message")
                     data = json.dumps(event.get("data", {}), ensure_ascii=False)
                     msg = f"event: {event_type}\ndata: {data}\n\n"
-                    self.wfile.write(msg.encode('utf-8'))
+                    self.wfile.write(msg.encode("utf-8"))
                     self.wfile.flush()
                 else:
                     # Send keepalive comment
@@ -3356,7 +4703,8 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
 
     def _live_start(self):
         from live_transcriber import get_session_manager
-        content_length = int(self.headers.get('Content-Length', 0))
+
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
         try:
             params = json.loads(body) if body else {}
@@ -3375,10 +4723,10 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
         sm = get_session_manager(self.__class__.transcript_dir)
         try:
             session_id = sm.start_session(source_id, model, chunk_duration, device)
-            payload = json.dumps({"session_id": session_id}).encode('utf-8')
+            payload = json.dumps({"session_id": session_id}).encode("utf-8")
             self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', str(len(payload)))
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
         except RuntimeError as e:
@@ -3386,25 +4734,29 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
 
     def _live_pause(self):
         from live_transcriber import get_session_manager
+
         sm = get_session_manager(self.__class__.transcript_dir)
         sm.pause_session()
         self._json_ok({"status": "paused"})
 
     def _live_resume(self):
         from live_transcriber import get_session_manager
+
         sm = get_session_manager(self.__class__.transcript_dir)
         sm.resume_session()
         self._json_ok({"status": "recording"})
 
     def _live_stop(self):
         from live_transcriber import get_session_manager
+
         sm = get_session_manager(self.__class__.transcript_dir)
         summary = sm.stop_session()
         self._json_ok(summary)
 
     def _live_save(self):
         from live_transcriber import get_session_manager
-        content_length = int(self.headers.get('Content-Length', 0))
+
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
         try:
             params = json.loads(body) if body else {}
@@ -3427,28 +4779,28 @@ Oddziel posty podwójną nową linią.{example_section}{feedback_section}"""
         self._json_ok(result)
 
     def _json_ok(self, data):
-        payload = json.dumps(data, ensure_ascii=False).encode('utf-8')
+        payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(payload)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
     # ── Audio file (supports Range Requests) ────────────────────────
     def _serve_audio(self, filename):
         cls = self.__class__
-        
+
         # Seek file in transcript dir
         audio_path = os.path.join(cls.transcript_dir, filename)
         if not os.path.isfile(audio_path):
             # Check parent directory
             parent = os.path.dirname(os.path.abspath(cls.transcript_dir))
             audio_path = os.path.join(parent, filename)
-            
+
         if not os.path.isfile(audio_path):
             # Fallback
             audio_path = cls.audio_path
-            
+
         if not audio_path or not os.path.isfile(audio_path):
             self.send_error(404, "Audio file not found")
             return
@@ -3511,7 +4863,20 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 # Discovery helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus", ".webm", ".mp4", ".mkv", ".mov"}
+AUDIO_EXTENSIONS = {
+    ".wav",
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".m4a",
+    ".aac",
+    ".wma",
+    ".opus",
+    ".webm",
+    ".mp4",
+    ".mkv",
+    ".mov",
+}
 
 
 def find_transcript_json(directory: str) -> str | None:
@@ -3564,29 +4929,36 @@ def find_audio_for_json(json_path: str, directory: str) -> str | None:
 # Main
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Interactive Transcript Viewer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--dir", default="./transcripts",
+        "--dir",
+        default="./transcripts",
         help="Transcript directory containing .json files (default: ./transcripts)",
     )
     parser.add_argument(
-        "--audio", default=None,
+        "--audio",
+        default=None,
         help="Explicit path to the audio file (auto-detected if omitted)",
     )
     parser.add_argument(
-        "--port", type=int, default=8765,
+        "--port",
+        type=int,
+        default=8765,
         help="HTTP server port (default: 8765)",
     )
     parser.add_argument(
-        "--no-browser", action="store_true",
+        "--no-browser",
+        action="store_true",
         help="Don't auto-open the browser",
     )
     parser.add_argument(
-        "--default", default=None,
+        "--default",
+        default=None,
         help="Base name of the default transcript to open (e.g. 'ola' for ola.json)",
     )
     args = parser.parse_args()
@@ -3602,18 +4974,24 @@ def main():
         if os.path.isfile(candidate):
             json_path = candidate
         else:
-            print(f"\033[93m⚠ Requested default '{args.default}.json' not found, falling back to auto-detect.\033[0m")
+            print(
+                f"\033[93m⚠ Requested default '{args.default}.json' not found, falling back to auto-detect.\033[0m"
+            )
     if not json_path:
         json_path = find_transcript_json(transcript_dir)
     if not json_path:
-        print(f"\033[93m⚠ No JSON file found in {transcript_dir} — starting in empty mode.\033[0m")
+        print(
+            f"\033[93m⚠ No JSON file found in {transcript_dir} — starting in empty mode.\033[0m"
+        )
         transcript_data = {"segments": []}
         audio_path = ""
         page_title = "Brak transkrypcji"
     else:
         with open(json_path, "r", encoding="utf-8") as f:
             transcript_data = json.load(f)
-        print(f"\033[92m✓\033[0m Default transcript: \033[1m{os.path.basename(json_path)}\033[0m")
+        print(
+            f"\033[92m✓\033[0m Default transcript: \033[1m{os.path.basename(json_path)}\033[0m"
+        )
 
         # Find default audio
         audio_path = args.audio
@@ -3625,7 +5003,9 @@ def main():
                 audio_path = find_audio_file(transcript_dir)
 
         if audio_path and os.path.isfile(audio_path):
-            print(f"\033[92m✓\033[0m Default audio: \033[1m{os.path.basename(audio_path)}\033[0m")
+            print(
+                f"\033[92m✓\033[0m Default audio: \033[1m{os.path.basename(audio_path)}\033[0m"
+            )
         else:
             print(f"\033[93m⚠\033[0m No default audio found")
             audio_path = ""
