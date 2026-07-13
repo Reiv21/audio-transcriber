@@ -1261,6 +1261,84 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
 /* Pulsing spinner for running jobs */
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;animation:spin 1s linear infinite}
+
+/* ── Screenshot Modal ─────────────────────────────────────────── */
+.screenshot-gallery {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 10px 0;
+}
+.screenshot-card {
+  flex: 0 0 280px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.screenshot-card img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #000;
+}
+.screenshot-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  background: rgba(108,156,255,0.15);
+  color: var(--accent-0);
+  border: 1px solid rgba(108,156,255,0.4);
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.screenshot-action:hover {
+  background: rgba(108,156,255,0.25);
+}
+.camera-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  margin-left: auto;
+  transition: all 0.15s;
+}
+.camera-btn:hover {
+  color: var(--accent-0);
+  background: rgba(108,156,255,0.1);
+}
+
+/* ── Lightbox for Fullscreen Image Preview ─────────────────────── */
+.lightbox-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  cursor: zoom-out;
+}
+.lightbox-content {
+  max-width: 90%;
+  max-height: 90%;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  cursor: default;
+}
 </style>
 </head>
 <body>
@@ -1600,6 +1678,26 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       <div class="queue-empty">Brak zadań w kolejce</div>
     </div>
   </div>
+</div>
+
+<!-- Screenshot Modal -->
+<div class="queue-overlay" id="screenshotOverlay" style="display:none" onclick="if(event.target===this) this.style.display='none'">
+  <div class="queue-modal" style="max-width: 950px;">
+    <div class="queue-modal-header">
+      <h3>📸 Zrzuty ekranu: <span id="screenshotSpeakerName"></span></h3>
+      <button class="queue-close" onclick="document.getElementById('screenshotOverlay').style.display='none'">&times;</button>
+    </div>
+    <div class="queue-body">
+      <div id="screenshotLoading" style="text-align:center; padding: 30px; color:var(--text-dim);">Pobieranie klatek z wideo... (to może potrwać kilka sekund)</div>
+      <div id="screenshotError" style="display:none; color:#f87171; padding: 20px; text-align:center;"></div>
+      <div class="screenshot-gallery" id="screenshotGallery" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox overlay for full preview -->
+<div class="lightbox-overlay" id="lightboxOverlay" style="display:none" onclick="closeLightbox()">
+  <img class="lightbox-content" id="lightboxImage" src="" onclick="event.stopPropagation()">
 </div>
 
 <audio id="audio" preload="auto"></audio>
@@ -2010,7 +2108,16 @@ function buildSpeakerCheckboxes(){
     label.htmlFor = 'spk_cb_' + spk;
     label.textContent = speakerNames[spk] || spk;
 
-    item.append(cb, dot, label);
+    const cameraBtn = document.createElement('button');
+    cameraBtn.className = 'camera-btn';
+    cameraBtn.title = 'Pobierz miniaturkę z wideo';
+    cameraBtn.innerHTML = '📸';
+    cameraBtn.onclick = (e) => {
+        e.stopPropagation();
+        openScreenshotModal(spk, label.textContent);
+    };
+
+    item.append(cb, dot, label, cameraBtn);
     container.appendChild(item);
   });
 }
@@ -3659,6 +3766,82 @@ function rejectSpeakerResult() {
   document.getElementById('sfResult').style.display = 'none';
   document.getElementById('sfResultActions').style.display = 'none';
 }
+
+// ── Speaker Screenshots ───────────────────────────────────────────────
+async function openScreenshotModal(speakerId, speakerNameStr) {
+  if (!currentActiveName) return;
+  document.getElementById('screenshotOverlay').style.display = 'flex';
+  document.getElementById('screenshotSpeakerName').textContent = speakerNameStr;
+
+  const loadingEl = document.getElementById('screenshotLoading');
+  const errorEl = document.getElementById('screenshotError');
+  const galleryEl = document.getElementById('screenshotGallery');
+
+  loadingEl.style.display = 'block';
+  errorEl.style.display = 'none';
+  galleryEl.style.display = 'none';
+  galleryEl.innerHTML = '';
+
+  try {
+    const url = `/api/speaker-screenshots?name=${encodeURIComponent(currentActiveName)}&speaker=${encodeURIComponent(speakerId)}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(data.error || 'Nieznany błąd serwera');
+    }
+
+    if (data.screenshots && data.screenshots.length > 0) {
+      data.screenshots.forEach((shot, index) => {
+        const card = document.createElement('div');
+        card.className = 'screenshot-card';
+
+        const img = document.createElement('img');
+        img.src = shot.base64;
+        img.style.cursor = 'zoom-in';
+        img.title = 'Kliknij, aby powiększyć';
+        img.onclick = () => showLightbox(shot.base64);
+
+        const info = document.createElement('div');
+        info.style.cssText = 'font-size:0.75rem; color:var(--text-dim); text-align:center;';
+        info.textContent = `Pobrano z ${fmt(shot.time)}`;
+
+        const link = document.createElement('a');
+        link.href = shot.base64;
+        link.download = `${currentActiveName.replace(/\.json$/, '')}_${speakerNameStr.replace(/[^A-Za-z0-9]/g, '_')}_${index+1}.jpg`;
+        link.className = 'screenshot-action';
+        link.innerHTML = '⬇️ Pobierz';
+
+        card.append(img, info, link);
+        galleryEl.appendChild(card);
+      });
+
+      loadingEl.style.display = 'none';
+      galleryEl.style.display = 'flex';
+    } else {
+      throw new Error('Nie udało się wygenerować zrzutów.');
+    }
+
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'block';
+    errorEl.textContent = `Błąd: ${err.message}`;
+  }
+}
+
+function showLightbox(src) {
+  const overlay = document.getElementById('lightboxOverlay');
+  const img = document.getElementById('lightboxImage');
+  img.src = src;
+  overlay.style.display = 'flex';
+}
+
+function closeLightbox() {
+  const overlay = document.getElementById('lightboxOverlay');
+  const img = document.getElementById('lightboxImage');
+  overlay.style.display = 'none';
+  img.src = '';
+}
 </script>
 </body>
 </html>
@@ -4020,6 +4203,10 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._serve_posts(query)
         elif path == "/api/prompt":
             self._serve_prompt()
+        elif path == "/api/speaker-screenshots":
+            name = query.get("name", [None])[0]
+            speaker = query.get("speaker", [None])[0]
+            self._serve_speaker_screenshots(name, speaker)
         elif path.startswith("/audio/"):
             filename = urllib.parse.unquote(path[7:])  # remove "/audio/"
             self._serve_audio(filename)
@@ -4167,6 +4354,79 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             data = json.load(f)
 
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    # ── API: Get speaker screenshots ──────────────────────────────────
+    def _serve_speaker_screenshots(self, name, speaker):
+        if not name or not speaker or "/" in name or "\\" in name:
+            self._json_error(400, "Brak parametru name lub speaker.")
+            return
+
+        cls = self.__class__
+        json_path = os.path.join(cls.transcript_dir, name)
+        if not os.path.isfile(json_path):
+            self._json_error(404, "Nie znaleziono pliku JSON.")
+            return
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        segments = data.get("segments", [])
+        spk_segments = [s for s in segments if s.get("speaker") == speaker and "start" in s and "end" in s]
+        if not spk_segments:
+            self._json_error(404, "Brak segmentów dla tego mówcy.")
+            return
+
+        audio_path = find_audio_for_json(json_path, cls.transcript_dir)
+        if not audio_path or not os.path.isfile(audio_path):
+            self._json_error(404, "Nie znaleziono pliku wideo dla tej transkrypcji.")
+            return
+
+        # Sort segments by duration descending
+        spk_segments.sort(key=lambda s: s["end"] - s["start"], reverse=True)
+        # Take up to 3 longest segments
+        best_segments = spk_segments[:3]
+
+        import base64
+        import subprocess
+
+        screenshots = []
+        for seg in best_segments:
+            midpoint = (seg["start"] + seg["end"]) / 2.0
+            try:
+                result = subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-ss", str(midpoint),
+                        "-i", audio_path,
+                        "-vframes", "1",
+                        "-q:v", "5",
+                        "-f", "image2pipe",
+                        "-vcodec", "mjpeg",
+                        "-"
+                    ],
+                    capture_output=True,
+                    timeout=15
+                )
+                if result.returncode == 0 and len(result.stdout) > 0:
+                    b64 = base64.b64encode(result.stdout).decode("ascii")
+                    screenshots.append({
+                        "time": midpoint,
+                        "base64": f"data:image/jpeg;base64,{b64}"
+                    })
+            except Exception as e:
+                pass
+
+        if not screenshots:
+            self._json_error(400, "Nie udało się wyciągnąć klatek (być może plik to tylko audio, a nie wideo).")
+            return
+
+        payload = json.dumps({"screenshots": screenshots}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
