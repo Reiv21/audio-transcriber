@@ -251,7 +251,14 @@ class ChunkProcessor:
         print(f"[live] Model loaded successfully.")
 
     def transcribe_chunk(self, pcm_bytes: bytes, sample_rate: int = 16000) -> dict:
-        """Transcribe a PCM audio chunk. Returns segments with word-level timestamps."""
+        """Transcribe a PCM audio chunk. Returns segments with word-level timestamps.
+
+        OOM retry logic:
+        - First attempt uses batch_size=16 (default).
+        - On GPU OOM: clear VRAM, retry exactly once with batch_size=1.
+        - On second failure: raise RuntimeError (no further retries).
+        - After every successful transcription: call torch.cuda.empty_cache() for VRAM cleanup.
+        """
         import whisperx
         import torch
         import numpy as np
@@ -273,18 +280,29 @@ class ChunkProcessor:
         if self.device == "cuda":
             torch.cuda.empty_cache()
 
-        # Transcribe
+        # Transcribe with OOM retry logic
         try:
-            result = self._model.transcribe(audio_array, batch_size=1, language="pl")
-        except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
-            # OOM — try clearing cache and retrying once
-            print(f"[live] GPU error on transcription, clearing cache and retrying: {e}")
+            result = self._model.transcribe(audio_array, batch_size=16, language="pl")
+        except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+            # Only handle CUDA OOM errors — re-raise other RuntimeErrors
+            if isinstance(e, RuntimeError) and "CUDA out of memory" not in str(e):
+                raise
+
+            # First OOM: clear GPU memory and retry with batch_size=1
+            print(f"[live] GPU OOM on transcription, clearing cache and retrying with batch_size=1: {e}")
             gc.collect()
             torch.cuda.empty_cache()
             try:
                 result = self._model.transcribe(audio_array, batch_size=1, language="pl")
-            except Exception as e2:
-                raise RuntimeError(f"Transcription failed after retry: {e2}")
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as e2:
+                # Second failure — raise without further retries
+                raise RuntimeError(
+                    f"Transcription failed after OOM retry with batch_size=1: {e2}"
+                ) from e2
+
+        # Post-chunk VRAM cleanup — release GPU memory after every successful transcription
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
 
         # Skip alignment to save VRAM (word-level timestamps are nice-to-have,
         # but alignment model takes ~1-2GB extra VRAM which causes OOM on 8GB cards)
@@ -581,75 +599,145 @@ class SessionManager:
         self._processor = None
         self._accumulator.clear()
 
+    def reset_to_idle(self):
+        """Full cleanup: unload model, stop capture, clear all state.
+        
+        Transitions to 'idle' so that a new start_session() call works
+        without restarting the application. Safe to call from any state.
+        """
+        # Unload model to free VRAM
+        if self._processor:
+            try:
+                self._processor.unload_model()
+            except Exception as e:
+                print(f"[live] Error unloading model during reset: {e}")
+
+        # Stop audio capture
+        if self._capture:
+            try:
+                self._capture.stop()
+            except Exception as e:
+                print(f"[live] Error stopping capture during reset: {e}")
+
+        # Clear transcript accumulator
+        self._accumulator.clear()
+
+        # Reset state to idle
+        self.state = "idle"
+        self.session_id = None
+        self._capture = None
+        self._processor = None
+
+        # Clear threading events so they don't block a future session
+        self._stop_event.clear()
+        self._pause_event.clear()
+
     # ── Internal ──────────────────────────────────────────────────────────
 
     def _processing_loop(self):
-        """Background thread: loads model, then waits for chunks and processes them."""
+        """Background thread: loads model, then waits for chunks and processes them.
+
+        Error handling:
+        - Per-chunk: on transcription failure after retry, skip chunk, advance
+          timestamps, emit recoverable error, continue with next chunk.
+        - Outer catch-all: on unhandled exception, emit non-recoverable error,
+          stop session and reset to idle so user can start a new session.
+        - Source death: detect via is_source_alive, pause + emit error event.
+        """
         # Load model on first iteration (lazy — allows capture to start immediately)
         model_loaded = False
 
-        while not self._stop_event.is_set():
-            # If paused, wait
-            if self._pause_event.is_set():
-                time.sleep(0.2)
-                continue
+        try:
+            while not self._stop_event.is_set():
+                # If paused, wait
+                if self._pause_event.is_set():
+                    time.sleep(0.2)
+                    continue
 
-            if self._capture is None:
-                break
+                if self._capture is None:
+                    break
 
-            # Check if source died
-            if not self._capture.is_source_alive and self.state == "recording":
-                self._error = "Źródło audio zostało utracone"
-                self.pause_session()
-                self._emit_event("error_event", {"message": self._error, "recoverable": True})
-                continue
+                # Check if source died
+                if not self._capture.is_source_alive and self.state == "recording":
+                    self._error = "Źródło audio zostało utracone"
+                    self.pause_session()
+                    self._emit_event("error_event", {"message": self._error, "recoverable": True})
+                    continue
 
-            # Try to get a full chunk
-            chunk = self._capture.get_chunk(self.chunk_duration)
-            if chunk is None:
-                time.sleep(0.3)
-                continue
+                # Try to get a full chunk
+                chunk = self._capture.get_chunk(self.chunk_duration)
+                if chunk is None:
+                    time.sleep(0.3)
+                    continue
 
-            # Load model on first chunk (lazy loading)
-            if not model_loaded:
-                self._emit_event("status", {**self.get_status(), "message": "Ładowanie modelu WhisperX..."})
-                try:
-                    self._processor.load_model()
-                    model_loaded = True
-                except Exception as e:
-                    self._error = f"Nie udało się załadować modelu: {e}"
-                    self._emit_event("error_event", {"message": self._error, "recoverable": False})
-                    self.state = "stopped"
-                    return
+                # Load model on first chunk (lazy loading)
+                if not model_loaded:
+                    self._emit_event("status", {**self.get_status(), "message": "Ładowanie modelu WhisperX..."})
+                    try:
+                        self._processor.load_model()
+                        model_loaded = True
+                    except Exception as e:
+                        self._error = f"Nie udało się załadować modelu: {e}"
+                        self._emit_event("error_event", {"message": self._error, "recoverable": False})
+                        self.state = "stopped"
+                        return
 
-            # Process chunk
-            self._chunks_processing += 1
-            self._emit_status()
-
-            try:
-                time_offset = self._recording_duration
-                result = self._processor.transcribe_chunk(chunk)
-                chunk_duration_actual = len(chunk) / CaptureEngine.BYTES_PER_SECOND
-                self._recording_duration += chunk_duration_actual
-                new_segs = self._accumulator.append_chunk(result, time_offset)
-                self._chunks_completed += 1
-                self._chunks_processing -= 1
-
-                if new_segs:
-                    self._emit_event("chunk", {
-                        "chunk_index": self._chunks_completed,
-                        "time_offset": time_offset,
-                        "segments": new_segs
-                    })
+                # Process chunk — per-chunk error handling
+                self._chunks_processing += 1
                 self._emit_status()
 
-            except Exception as e:
-                self._chunks_processing -= 1
-                err_msg = f"Błąd transkrypcji porcji: {str(e)}"
-                print(f"[live] {err_msg}")
-                self._emit_event("error_event", {"message": err_msg, "recoverable": True})
-                # Advance recording duration anyway so timestamps stay correct
-                self._recording_duration += len(chunk) / CaptureEngine.BYTES_PER_SECOND
+                try:
+                    time_offset = self._recording_duration
+                    result = self._processor.transcribe_chunk(chunk)
+                    chunk_duration_actual = len(chunk) / CaptureEngine.BYTES_PER_SECOND
+                    self._recording_duration += chunk_duration_actual
+                    new_segs = self._accumulator.append_chunk(result, time_offset)
+                    self._chunks_completed += 1
+                    self._chunks_processing -= 1
+
+                    if new_segs:
+                        self._emit_event("chunk", {
+                            "chunk_index": self._chunks_completed,
+                            "time_offset": time_offset,
+                            "segments": new_segs
+                        })
+                    self._emit_status()
+
+                except Exception as e:
+                    # Chunk failed after retry — skip it, advance timestamps, continue
+                    self._chunks_processing -= 1
+                    chunk_index = self._chunks_completed + 1
+                    err_msg = f"Błąd transkrypcji porcji #{chunk_index}: {str(e)}"
+                    print(f"[live] {err_msg}")
+                    self._emit_event("error_event", {
+                        "message": err_msg,
+                        "recoverable": True,
+                        "skipped_chunk": chunk_index
+                    })
+                    # Advance recording duration so subsequent timestamps stay correct
+                    self._recording_duration += len(chunk) / CaptureEngine.BYTES_PER_SECOND
+                    self._chunks_completed += 1
+                    continue
+
+        except Exception as e:
+            # Unhandled exception (not chunk-related) — fatal error recovery
+            err_msg = f"Nieoczekiwany błąd w pętli przetwarzania: {str(e)}"
+            print(f"[live] FATAL: {err_msg}")
+            self._error = err_msg
+            self._emit_event("error_event", {
+                "message": err_msg,
+                "recoverable": False
+            })
+            # Stop session and reset to idle for clean recovery
+            try:
+                self.stop_session()
+            except Exception:
+                pass
+            try:
+                self.reset_to_idle()
+            except Exception:
+                # If reset_to_idle is not yet implemented, fall back to basic reset
+                self.state = "idle"
 
     def _emit_event(self, event_type: str, data: dict):
         """Push event to SSE queue."""

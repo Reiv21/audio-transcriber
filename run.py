@@ -83,7 +83,7 @@ def main():
 
     # Jeśli nie podano pliku wejściowego — uruchom sam viewer
     if not args.input:
-        print(f"\033[92m[*] Uruchamianie viewera bez transkrypcji (tryb przeglądania)...\033[0m")
+        print(f"\033[92m[*] Uruchamianie viewera (tryb przeglądania)...\033[0m", flush=True)
         viewer_cmd = [
             sys.executable, "viewer.py",
             "--dir", "./transcripts",

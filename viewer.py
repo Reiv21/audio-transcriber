@@ -10,6 +10,7 @@ to remove transcripts and associated audio files from the server.
 """
 
 import argparse
+import datetime
 import http.server
 import json
 import mimetypes
@@ -663,6 +664,104 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
   justify-content: flex-end;
 }
 
+/* Prompt Editor */
+.prompt-editor-section{
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.prompt-editor-toggle{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  border-radius: 6px;
+}
+.prompt-editor-toggle:hover{
+  color: var(--text);
+  background: rgba(255,255,255,0.03);
+}
+.prompt-editor-arrow{
+  transition: transform 0.2s;
+  font-size: 0.7rem;
+}
+.prompt-editor-arrow.open{ transform: rotate(90deg); }
+.prompt-editor-body{
+  padding: 12px 0 0;
+}
+.prompt-editor-textarea{
+  width: 100%;
+  min-height: 180px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.prompt-editor-textarea:focus{
+  border-color: var(--accent-0);
+}
+.prompt-editor-textarea.over-limit{
+  border-color: #f87171;
+}
+.prompt-editor-footer{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.prompt-editor-charcount{
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.prompt-editor-charcount.over-limit{
+  color: #f87171;
+  font-weight: 600;
+}
+.prompt-editor-actions{
+  display: flex;
+  gap: 8px;
+}
+.prompt-btn-save{
+  border-color: rgba(108,156,255,0.3) !important;
+}
+.prompt-btn-save:hover{
+  background: rgba(108,156,255,0.12) !important;
+  color: var(--accent-0) !important;
+}
+.prompt-btn-save:disabled{
+  opacity: 0.4;
+  cursor: not-allowed !important;
+}
+.prompt-btn-reset{
+  border-color: rgba(248,113,113,0.3) !important;
+}
+.prompt-btn-reset:hover{
+  background: rgba(248,113,113,0.12) !important;
+  color: #f87171 !important;
+}
+.toast.error{
+  background: rgba(248,113,113,0.95);
+}
+
 /* Loading spinner */
 .posts-loading{
   display: none;
@@ -932,7 +1031,7 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
   text-align: center;
 }
 
-/* ── Pinned Post Panel ───────────────────────────────────── */
+/* ── Pinned Post Panel (multi-pin) ───────────────────────── */
 .pinned-post-panel{
   position: fixed;
   top: 80px;
@@ -978,31 +1077,51 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
 }
 .pinned-post-close:hover{ background: rgba(255,255,255,0.06); color: var(--text); }
 .pinned-post-body{
-  padding: 16px;
+  padding: 0;
   flex: 1;
   overflow-y: auto;
 }
+.pinned-post-item{
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pinned-post-item:last-child{ border-bottom: none; }
+.pinned-post-item-header{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pinned-post-item-header .pinned-idx{
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent-0);
+  min-width: 18px;
+}
+.pinned-post-item-header .pinned-post-label{
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  flex: 1;
+}
+.pinned-post-item-header .pinned-unpin-btn{
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.pinned-post-item-header .pinned-unpin-btn:hover{ background: rgba(255,255,255,0.06); color: var(--text); }
 .pinned-post-text{
-  font-size: 0.88rem;
-  line-height: 1.75;
+  font-size: 0.85rem;
+  line-height: 1.6;
   color: var(--text);
-  outline: none;
-  min-height: 60px;
   white-space: pre-wrap;
   word-wrap: break-word;
-}
-.pinned-post-text:focus{
-  background: rgba(255,255,255,0.03);
-  border-radius: 6px;
-  padding: 8px;
-  margin: -8px;
-}
-.pinned-post-actions{
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
 }
 @media(max-width:900px){
   .pinned-post-panel{
@@ -1011,6 +1130,137 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
     border-radius: var(--radius) var(--radius) 0 0;
   }
 }
+</style>
+
+<style>
+/* ── Queue Panel ──────────────────────────────────────────────── */
+.queue-overlay{
+  position:fixed;inset:0;z-index:900;
+  background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+.queue-modal{
+  background:#13151c;
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:var(--radius);
+  width:100%;max-width:680px;
+  max-height:80vh;
+  display:flex;flex-direction:column;
+  box-shadow:0 24px 80px rgba(0,0,0,0.6);
+}
+.queue-modal-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:18px 22px 14px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.queue-modal-header h3{
+  font-size:1rem;font-weight:700;color:var(--text-bright);
+  display:flex;align-items:center;gap:8px;
+}
+.queue-close{
+  background:none;border:none;color:var(--text-dim);
+  font-size:1.4rem;cursor:pointer;padding:2px 6px;
+  border-radius:6px;transition:all .15s;line-height:1;
+}
+.queue-close:hover{background:rgba(255,255,255,0.08);color:var(--text-bright)}
+.queue-body{
+  overflow-y:auto;padding:14px 18px 18px;
+  display:flex;flex-direction:column;gap:10px;
+  flex:1;min-height:0;
+}
+.queue-empty{
+  text-align:center;color:var(--text-dim);
+  padding:40px 20px;font-size:0.9rem;
+}
+/* Job card */
+.job-card{
+  background:rgba(255,255,255,0.04);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:14px 16px;
+  transition:border-color .2s;
+}
+.job-card:hover{border-color:rgba(255,255,255,0.14)}
+.job-card.status-running{border-color:rgba(108,156,255,0.3);background:rgba(108,156,255,0.05)}
+.job-card.status-done{border-color:rgba(52,211,153,0.3);background:rgba(52,211,153,0.04)}
+.job-card.status-error{border-color:rgba(248,113,113,0.3);background:rgba(248,113,113,0.04)}
+.job-card.status-queued{border-color:rgba(251,191,36,0.25);background:rgba(251,191,36,0.04)}
+.job-card.status-cancelled{opacity:.5}
+.job-card-top{
+  display:flex;align-items:center;gap:10px;margin-bottom:8px;
+}
+.job-status-icon{font-size:1.1rem;flex-shrink:0}
+.job-name{
+  font-size:0.85rem;font-weight:600;color:var(--text-bright);
+  flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.job-status-label{
+  font-size:0.7rem;font-weight:700;letter-spacing:.05em;
+  padding:2px 8px;border-radius:20px;
+  background:rgba(255,255,255,0.07);color:var(--text-dim);
+}
+.status-running .job-status-label{background:rgba(108,156,255,0.15);color:var(--accent-0)}
+.status-done .job-status-label{background:rgba(52,211,153,0.15);color:var(--accent-2)}
+.status-error .job-status-label{background:rgba(248,113,113,0.15);color:#f87171}
+.status-queued .job-status-label{background:rgba(251,191,36,0.15);color:var(--accent-4)}
+.job-progress-bar-outer{
+  width:100%;height:4px;border-radius:2px;
+  background:rgba(255,255,255,0.07);margin-bottom:6px;
+  overflow:hidden;
+}
+.job-progress-bar-inner{
+  height:100%;border-radius:2px;
+  background:linear-gradient(90deg,var(--accent-0),var(--accent-1));
+  transition:width .4s ease;
+}
+.status-done .job-progress-bar-inner{background:linear-gradient(90deg,var(--accent-2),#22d3ee)}
+.status-error .job-progress-bar-inner{background:linear-gradient(90deg,#f87171,#f97316)}
+.job-msg{
+  font-size:0.75rem;color:var(--text-dim);
+  line-height:1.45;word-break:break-word;
+}
+.job-actions{
+  display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;
+}
+.job-action-btn{
+  font-family:var(--font);font-size:0.75rem;font-weight:600;
+  padding:5px 12px;border-radius:6px;border:1px solid var(--border);
+  background:rgba(255,255,255,0.05);color:var(--text);
+  cursor:pointer;transition:all .15s;
+}
+.job-action-btn:hover{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2)}
+.job-action-btn.primary{
+  background:rgba(108,156,255,0.15);border-color:rgba(108,156,255,0.4);
+  color:var(--accent-0);
+}
+.job-action-btn.primary:hover{background:rgba(108,156,255,0.25)}
+.job-action-btn.danger{
+  background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.3);
+  color:#f87171;
+}
+.job-action-btn.danger:hover{background:rgba(248,113,113,0.2)}
+/* Queue badge in sidebar */
+.queue-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:18px;height:18px;padding:0 5px;
+  background:var(--accent-0);color:#fff;
+  border-radius:9px;font-size:0.65rem;font-weight:700;
+  margin-left:6px;
+}
+/* Upload dropzone multi-file selected list */
+.upload-file-list{
+  margin-top:8px;display:flex;flex-direction:column;gap:4px;
+  max-height:100px;overflow-y:auto;
+}
+.upload-file-item{
+  font-size:0.75rem;color:var(--accent-0);font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* Pulsing spinner for running jobs */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-block;animation:spin 1s linear infinite}
 </style>
 </head>
 <body>
@@ -1031,6 +1281,9 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Nowa transkrypcja
       </button>
+      <button class="btn-upload" id="btnQueueShow" onclick="openQueuePanel()" style="margin-top:8px;border-color:rgba(108,156,255,0.3);background:rgba(108,156,255,0.06);color:var(--accent-0)">
+        ⏳ Kolejka zadań<span class="queue-badge" id="queueBadge" style="display:none">0</span>
+      </button>
       <a href="/live" class="btn-upload" style="margin-top:8px;text-decoration:none;border-color:rgba(167,139,250,0.4);background:rgba(167,139,250,0.06);color:var(--accent-1)">
         🎙️ Transkrypcja na żywo
       </a>
@@ -1039,6 +1292,7 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       </button>
     </div>
   </aside>
+
 
   <!-- Main Content -->
   <main class="main-content" id="mainContent">
@@ -1166,6 +1420,23 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
               <input type="number" id="cfgTemperature" value="0.0" min="0.0" max="1.5" step="0.1">
             </div>
           </div>
+          <!-- Prompt Editor collapsible section -->
+          <div class="prompt-editor-section" id="promptEditorSection">
+            <button class="prompt-editor-toggle" id="promptEditorToggle" onclick="togglePromptEditor()">
+              ✏️ Edytuj prompt <span class="prompt-editor-arrow" id="promptEditorArrow">▸</span>
+            </button>
+            <div class="prompt-editor-body" id="promptEditorBody" style="display:none">
+              <textarea id="promptEditorTextarea" class="prompt-editor-textarea" rows="10" placeholder="Ładowanie..."></textarea>
+              <div class="prompt-editor-footer">
+                <span class="prompt-editor-charcount" id="promptCharCount">0 / 10000</span>
+                <div class="prompt-editor-actions">
+                  <button class="post-btn prompt-btn-reset" onclick="resetPromptToDefault()">Przywróć domyślny</button>
+                  <button class="post-btn prompt-btn-save" id="promptSaveBtn" onclick="savePrompt()">Zapisz prompt</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="config-actions">
             <button class="post-btn" onclick="togglePostsConfig()">Anuluj</button>
             <button class="btn-generate" id="btnGenerate" onclick="generatePosts()">Generuj ⚡</button>
@@ -1242,10 +1513,10 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-0);margin-bottom:12px">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
-        <p style="color:var(--text-bright);font-weight:600;margin-bottom:4px">Przeciągnij plik audio/wideo tutaj</p>
-        <p style="color:var(--text-dim);font-size:0.78rem">lub kliknij aby wybrać plik</p>
-        <p id="uploadFileName" style="color:var(--accent-0);font-size:0.8rem;margin-top:8px;font-weight:600;display:none"></p>
-        <input type="file" id="uploadFileInput" accept="audio/*,video/*,.mp3,.wav,.m4a,.ogg,.mp4,.mkv,.avi,.mov,.webm,.flac" style="display:none">
+        <p style="color:var(--text-bright);font-weight:600;margin-bottom:4px">Przeciągnij pliki audio/wideo tutaj</p>
+        <p style="color:var(--text-dim);font-size:0.78rem">lub kliknij aby wybrać (można wybrać wiele plików)</p>
+        <div class="upload-file-list" id="uploadFileList"></div>
+        <input type="file" id="uploadFileInput" accept="audio/*,video/*,.mp3,.wav,.m4a,.ogg,.mp4,.mkv,.avi,.mov,.webm,.flac" style="display:none" multiple>
       </div>
       <div class="upload-options">
         <div class="config-grid">
@@ -1308,18 +1579,26 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
   </div>
 </div>
 
-<!-- Pinned Post Panel -->
+<!-- Pinned Post Panel (multi-pin) -->
 <div class="pinned-post-panel" id="pinnedPostPanel">
   <div class="pinned-post-header">
-    <span id="pinnedPostLabel">📌 Post #1</span>
-    <button class="pinned-post-close" onclick="unpinPost()" title="Zamknij">&times;</button>
+    <span>📌 Przypięte posty</span>
+    <button class="pinned-post-close" onclick="unpinAllPosts()" title="Odpnij wszystkie">&times;</button>
   </div>
-  <div class="pinned-post-body">
-    <div class="pinned-post-text" id="pinnedPostText" contenteditable="true" spellcheck="true"></div>
+  <div class="pinned-post-body" id="pinnedPostBody">
   </div>
-  <div class="pinned-post-actions">
-    <button class="post-btn copy" onclick="copyPinnedPost()">📋 Kopiuj</button>
-    <button class="post-btn accept" onclick="acceptPinnedPost()">✓ Akceptuj</button>
+</div>
+
+<!-- Queue Panel -->
+<div class="queue-overlay" id="queueOverlay" style="display:none" onclick="handleQueueOverlayClick(event)">
+  <div class="queue-modal" id="queueModal">
+    <div class="queue-modal-header">
+      <h3>⏳ Kolejka transkrypcji</h3>
+      <button class="queue-close" onclick="closeQueuePanel()">&times;</button>
+    </div>
+    <div class="queue-body" id="queueBody">
+      <div class="queue-empty">Brak zadań w kolejce</div>
+    </div>
   </div>
 </div>
 
@@ -1343,21 +1622,21 @@ const ACCENTS = [
 function accentFor(idx){ return ACCENTS[idx % ACCENTS.length]; }
 
 // ── Zapisywanie nazw mówców w przeglądarce (per-transkrypcja) ──────────
-const GLOBAL_STORAGE_KEY = 'transcript_speaker_names';
-function getPerTranscriptKey(){ return 'speaker_names_' + currentActiveName.replace(/\.json$/,''); }
-function loadNames(){
+function getPerTranscriptKey(transcriptName){
+  const name = transcriptName || currentActiveName;
+  return 'speaker_names_' + name.replace(/\.json$/, '');
+}
+function loadNamesForTranscript(transcriptName){
   try{
-    const perKey = getPerTranscriptKey();
-    const perData = localStorage.getItem(perKey);
-    if(perData) return JSON.parse(perData);
-    // Fallback migracyjny z globalnego klucza
-    const globalData = localStorage.getItem(GLOBAL_STORAGE_KEY);
-    return globalData ? JSON.parse(globalData) : {};
+    const key = getPerTranscriptKey(transcriptName);
+    const data = localStorage.getItem(key);
+    return data ? JSON.parse(data) : {};
   } catch{ return {}; }
 }
+function loadNames(){ return loadNamesForTranscript(currentActiveName); }
 function saveName(orig, custom){
   const m = loadNames(); m[orig] = custom;
-  localStorage.setItem(getPerTranscriptKey(), JSON.stringify(m));
+  localStorage.setItem(getPerTranscriptKey(currentActiveName), JSON.stringify(m));
 }
 let speakerNames = loadNames();
 
@@ -1522,6 +1801,7 @@ function groupBySpeaker(segs){
 
 // ── Generowanie struktury DOM transkrypcji (zoptymalizowane DocumentFragment) ──
 function renderTranscript(transcriptData) {
+ try {
   const segments = transcriptData.segments || [];
   allWords = [];
   speakerEls.clear();
@@ -1645,12 +1925,14 @@ function renderTranscript(transcriptData) {
   populateDataLists();
   // Zbuduj panel checkboxów mówców
   buildSpeakerCheckboxes();
+ } catch(e) { console.error('renderTranscript ERROR:', e); document.getElementById('transcript').textContent = 'BŁĄD RENDEROWANIA: ' + e.message; }
 }
 
 // ── Wypełnienie select mówców ─────────────────────────────────────────
 function populateSpeakerSelect(resetSelection){
   const select = document.getElementById('cfgSpeakerSelect');
-  // Reset — NIE zachowuj poprzedniej wartości przy zmianie transkrypcji
+  // Preserve current selection across rebuilds (e.g. after speaker rename)
+  const prevVal = select.value;
   select.innerHTML = '<option value="">— Wszyscy mówcy —</option>';
   const seenSpeakers = new Set();
   const segments = (currentTranscriptData && currentTranscriptData.segments) || [];
@@ -1664,8 +1946,12 @@ function populateSpeakerSelect(resetSelection){
       select.appendChild(opt);
     }
   });
-  // Zawsze resetuj do "Wszyscy mówcy" przy ładowaniu nowej transkrypcji
-  select.selectedIndex = 0;
+  // Restore previous selection if still valid, otherwise reset to "all"
+  if(prevVal && !resetSelection && [...select.options].some(o => o.value === prevVal)){
+    select.value = prevVal;
+  } else {
+    select.selectedIndex = 0;
+  }
 }
 
 // ── Panel widoczności mówców ──────────────────────────────────────────
@@ -1733,6 +2019,13 @@ function showEmptyState() {
   currentActiveName = "";
   document.getElementById('headerTitle').textContent = "Brak transkrypcji";
   document.title = "Transkrypcja — Brak";
+
+  // Clear file param from URL
+  const url = new URL(window.location);
+  if (url.searchParams.has('file')) {
+    url.searchParams.delete('file');
+    history.replaceState({}, '', url);
+  }
 
   const container = document.getElementById('transcript');
   container.innerHTML = `
@@ -1855,7 +2148,8 @@ highlightLoop();
 
 // ── Skróty klawiszowe ────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if(e.target.isContentEditable) return;
+  const tag = e.target.tagName;
+  if(e.target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   switch(e.code){
     case 'Space':
       e.preventDefault(); togglePlay(); break;
@@ -1865,6 +2159,48 @@ document.addEventListener('keydown', e => {
       e.preventDefault(); if(audio.src) audio.currentTime = Math.min(audio.duration||0, audio.currentTime + 5); break;
   }
 });
+
+// ── URL Navigation Manager ────────────────────────────────────────────
+function setUrlTranscript(filename) {
+  const url = new URL(window.location);
+  url.searchParams.set('file', filename);
+  history.replaceState({}, '', url);
+}
+
+function getUrlTranscript() {
+  return new URL(window.location).searchParams.get('file');
+}
+
+async function initFromUrl(transcriptList) {
+  if (!transcriptList || transcriptList.length === 0) {
+    showEmptyState();
+    // Remove any stale file param from URL
+    const url = new URL(window.location);
+    if (url.searchParams.has('file')) {
+      url.searchParams.delete('file');
+      history.replaceState({}, '', url);
+    }
+    return;
+  }
+
+  const urlFile = getUrlTranscript();
+  let targetItem = null;
+
+  if (urlFile) {
+    // Validate URL param against available transcripts
+    targetItem = transcriptList.find(item => item.name === urlFile);
+  }
+
+  if (!targetItem) {
+    // Invalid or missing URL param — load first available transcript
+    targetItem = transcriptList[0];
+  }
+
+  // Update URL to reflect the loaded transcript
+  setUrlTranscript(targetItem.name);
+  // Load the transcript
+  await loadTranscript(targetItem.name, targetItem.audio, targetItem.title);
+}
 
 // ── Dynamiczne Ładowanie Listy i Transkrypcji ─────────────────────────
 async function loadTranscript(filename, audioFilename, title) {
@@ -1882,6 +2218,7 @@ async function loadTranscript(filename, audioFilename, title) {
     });
 
     currentActiveName = filename;
+    setUrlTranscript(filename);
     renderTranscript(data);
 
     document.getElementById('headerTitle').textContent = title;
@@ -1897,10 +2234,11 @@ async function loadTranscript(filename, audioFilename, title) {
     progressIn.style.width = "0%";
     timeCur.textContent = "0:00";
 
-    // Wyczyść posty przy zmianie transkrypcji
+    // Załaduj zapisane posty z serwera przy zmianie transkrypcji
     generatedPosts = [];
     renderPosts();
     clearAllHighlights();
+    await loadSavedPosts(filename);
 
   } catch (err) {
     console.error(err);
@@ -2040,19 +2378,79 @@ document.addEventListener('click', (e) => {
 });
 
 // Renderowanie startowe
-if (INITIAL_TRANSCRIPT && INITIAL_TRANSCRIPT.segments && INITIAL_TRANSCRIPT.segments.length > 0) {
-  renderTranscript(INITIAL_TRANSCRIPT);
-} else {
-  showEmptyState();
-}
-loadTranscriptList();
-initAllAutocomplete();
+(async function startup() {
+  try {
+    const response = await fetch('/api/list');
+    if (!response.ok) throw new Error("Błąd ładowania listy");
+    const list = await response.json();
+    await initFromUrl(list);
+    await loadTranscriptList();
+    initAllAutocomplete();
+  } catch (err) {
+    console.error("Błąd podczas inicjalizacji:", err);
+    showEmptyState();
+    loadTranscriptList();
+    initAllAutocomplete();
+  }
+})();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // POSTS GENERATION (z podświetlaniem źródeł)
 // ══════════════════════════════════════════════════════════════════════════════
 
 let generatedPosts = []; // {text, sources:[], status: 'pending'|'accepted'|'rejected'}
+
+// ── Ładowanie zapisanych postów z serwera ─────────────────────────────
+async function loadSavedPosts(transcriptName) {
+  if (!transcriptName) return;
+  try {
+    const resp = await fetch(`/api/posts?transcript=${encodeURIComponent(transcriptName)}`);
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    if (data.posts && data.posts.length > 0) {
+      generatedPosts = data.posts.map(p => ({
+        text: p.text || '',
+        sources: p.sources || [],
+        status: p.status || 'pending',
+        hlEnabled: true
+      }));
+      renderPosts();
+      highlightSources();
+    }
+  } catch (err) {
+    console.error('Błąd ładowania postów:', err);
+    showToast('Nie udało się załadować zapisanych postów: ' + err.message);
+    // Retain in-memory state (already empty) — don't crash
+  }
+}
+
+// ── Zapis zmiany pojedynczego posta na serwer ─────────────────────────
+async function persistPostUpdate(idx, changes) {
+  if (!currentActiveName) return;
+  try {
+    const body = {
+      transcript_name: currentActiveName,
+      index: idx,
+      ...changes
+    };
+    const resp = await fetch('/api/posts/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error || `HTTP ${resp.status}`);
+    }
+  } catch (err) {
+    console.error('Błąd zapisu posta:', err);
+    showToast('Nie udało się zapisać zmiany: ' + err.message);
+    // In-memory state is retained — user doesn't lose changes
+  }
+}
 
 function togglePostsConfig() {
   const cfg = document.getElementById('postsConfig');
@@ -2329,7 +2727,11 @@ function renderPosts() {
     textDiv.spellcheck = true;
     textDiv.textContent = post.text;
     textDiv.addEventListener('blur', () => {
-      generatedPosts[idx].text = textDiv.textContent.trim();
+      const newText = textDiv.textContent.trim();
+      if (newText !== generatedPosts[idx].text) {
+        generatedPosts[idx].text = newText;
+        persistPostUpdate(idx, { text: newText });
+      }
     });
 
     const actions = document.createElement('div');
@@ -2354,10 +2756,16 @@ function renderPosts() {
     });
 
     const btnPin = document.createElement('button');
-    btnPin.className = 'post-btn';
-    btnPin.innerHTML = '📌 Przypnij';
-    btnPin.title = 'Przypnij post do panelu bocznego';
-    btnPin.addEventListener('click', () => pinPost(idx));
+    btnPin.className = `post-btn ${isPinned(idx) ? 'active' : ''}`;
+    btnPin.innerHTML = isPinned(idx) ? '📌 Odpnij' : '📌 Przypnij';
+    btnPin.title = isPinned(idx) ? 'Odpnij post z panelu bocznego' : 'Przypnij post do panelu bocznego';
+    btnPin.addEventListener('click', () => {
+      if (isPinned(idx)) {
+        unpinPost(idx);
+      } else {
+        pinPost(idx, generatedPosts[idx].text);
+      }
+    });
 
     const btnGood = document.createElement('button');
     btnGood.className = 'post-btn';
@@ -2389,6 +2797,8 @@ function togglePostStatus(idx, status) {
   } else {
     generatedPosts[idx].status = status;
   }
+  // Persist status change to server
+  persistPostUpdate(idx, { status: generatedPosts[idx].status });
   // Aktualizuj tylko zmieniony element zamiast przebudowywać listę
   const card = document.querySelector(`.post-card[data-idx="${idx}"]`);
   if(card){
@@ -2485,115 +2895,8 @@ async function deleteAllTranscripts() {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// SPEAKER FINDER (YouTube → Transkrypcja → Szukanie mówcy)
-// ══════════════════════════════════════════════════════════════════════════════
-
-let sfJobId = null;
-let sfTranscriptName = null;
-let sfFoundSpeaker = null;
-
-async function startSpeakerFinder(){
-  const url = document.getElementById('sfYoutubeUrl').value.trim();
-  const person = document.getElementById('sfPersonName').value.trim();
-  if(!url || !person){ alert('Podaj URL YouTube i imię osoby.'); return; }
-
-  // Reset UI
-  document.getElementById('sfProgress').style.display = 'block';
-  document.getElementById('sfResult').style.display = 'none';
-  document.getElementById('sfError').style.display = 'none';
-  document.getElementById('sfStartBtn').disabled = true;
-  document.getElementById('sfProgressMsg').textContent = 'Pobieranie audio z YouTube...';
-
-  try{
-    // Step 1: Download & transcribe
-    const resp = await fetch('/api/transcribe-youtube', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({youtube_url: url, model: 'medium', device: 'cuda'})
-    });
-    if(!resp.ok){
-      const err = await resp.json();
-      throw new Error(err.error || 'Błąd pobierania');
-    }
-    const data = await resp.json();
-    sfJobId = data.job_id;
-    sfTranscriptName = (data.base_name || 'yt') + '.json';
-
-    // Step 2: Poll job status
-    document.getElementById('sfProgressMsg').textContent = 'Transkrypcja w toku...';
-    await pollSfJob();
-
-    // Step 3: Find speaker
-    document.getElementById('sfProgressMsg').textContent = 'Szukam mówcy w transkrypcji...';
-    const sfResp = await fetch('/api/find-speaker', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({transcript_name: sfTranscriptName, person_name: person})
-    });
-    const sfData = await sfResp.json();
-
-    document.getElementById('sfProgress').style.display = 'none';
-
-    if(sfData.found){
-      sfFoundSpeaker = sfData.speaker_id;
-      document.getElementById('sfResultText').textContent = `✅ Znaleziono: ${sfData.speaker_id} (pewność: ${sfData.confidence}%)`;
-      document.getElementById('sfResultFragment').textContent = sfData.fragment ? `"${sfData.fragment}"` : '';
-      document.getElementById('sfResult').style.display = 'block';
-    } else {
-      document.getElementById('sfError').style.display = 'block';
-      document.getElementById('sfError').textContent = 'Nie znaleziono imienia w transkrypcji. Wybierz mówcę ręcznie.';
-    }
-  } catch(e){
-    document.getElementById('sfProgress').style.display = 'none';
-    document.getElementById('sfError').style.display = 'block';
-    document.getElementById('sfError').textContent = 'Błąd: ' + e.message;
-  } finally {
-    document.getElementById('sfStartBtn').disabled = false;
-  }
-}
-
-async function pollSfJob(){
-  return new Promise((resolve, reject) => {
-    const interval = setInterval(async () => {
-      try{
-        const resp = await fetch(`/api/job-status?id=${encodeURIComponent(sfJobId)}`);
-        const job = await resp.json();
-        document.getElementById('sfProgressMsg').textContent = job.message || `Postęp: ${job.progress}%`;
-        if(job.status === 'done'){ clearInterval(interval); resolve(); }
-        else if(job.status === 'error'){ clearInterval(interval); reject(new Error(job.message)); }
-      } catch(e){ clearInterval(interval); reject(e); }
-    }, 2000);
-  });
-}
-
-function acceptSpeakerResult(){
-  if(!sfFoundSpeaker) return;
-  // Load the new transcript and set speaker
-  if(sfTranscriptName){
-    loadTranscriptList().then(() => {
-      loadTranscript(sfTranscriptName, '', sfTranscriptName.replace('.json',''));
-    });
-  }
-  // Set speaker select after transcript loads
-  setTimeout(() => {
-    const sel = document.getElementById('cfgSpeakerSelect');
-    for(let i = 0; i < sel.options.length; i++){
-      if(sel.options[i].value === sfFoundSpeaker){ sel.selectedIndex = i; break; }
-    }
-    showToast(`Mówca ${sfFoundSpeaker} ustawiony.`);
-  }, 1500);
-  document.getElementById('sfResult').style.display = 'none';
-}
-
-function rejectSpeakerResult(){
-  document.getElementById('sfResult').style.display = 'none';
-  sfFoundSpeaker = null;
-  showToast('Odrzucono. Wybierz mówcę ręcznie z listy.');
-}
-
 // Toast notification
-function showToast(msg) {
+function showToast(msg, isError) {
   let toast = document.getElementById('toast');
   if (!toast) {
     toast = document.createElement('div');
@@ -2602,18 +2905,106 @@ function showToast(msg) {
     document.body.appendChild(toast);
   }
   toast.textContent = msg;
+  toast.classList.remove('error');
+  if (isError) toast.classList.add('error');
   toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2500);
+  setTimeout(() => { toast.classList.remove('show'); toast.classList.remove('error'); }, 2500);
 }
+
+// ── Prompt Editor ─────────────────────────────────────────────────────────────
+let promptEditorLoaded = false;
+
+function togglePromptEditor() {
+  const body = document.getElementById('promptEditorBody');
+  const arrow = document.getElementById('promptEditorArrow');
+  const isHidden = body.style.display === 'none';
+  body.style.display = isHidden ? 'block' : 'none';
+  arrow.classList.toggle('open', isHidden);
+  if (isHidden && !promptEditorLoaded) {
+    loadPrompt();
+  }
+}
+
+async function loadPrompt() {
+  const textarea = document.getElementById('promptEditorTextarea');
+  try {
+    const resp = await fetch('/api/prompt');
+    if (!resp.ok) throw new Error('Nie udało się załadować promptu');
+    const data = await resp.json();
+    textarea.value = data.prompt || '';
+    updatePromptCharCount();
+    promptEditorLoaded = true;
+  } catch (err) {
+    textarea.value = '';
+    showToast('Błąd ładowania promptu: ' + err.message, true);
+  }
+}
+
+function updatePromptCharCount() {
+  const textarea = document.getElementById('promptEditorTextarea');
+  const countEl = document.getElementById('promptCharCount');
+  const saveBtn = document.getElementById('promptSaveBtn');
+  const len = textarea.value.length;
+  const max = 10000;
+  countEl.textContent = len + ' / ' + max;
+  const over = len > max;
+  countEl.classList.toggle('over-limit', over);
+  textarea.classList.toggle('over-limit', over);
+  if (saveBtn) saveBtn.disabled = over;
+}
+
+async function savePrompt() {
+  const textarea = document.getElementById('promptEditorTextarea');
+  const text = textarea.value;
+  if (text.length > 10000) {
+    showToast('Prompt jest za długi (max 10000 znaków)', true);
+    return;
+  }
+  try {
+    const resp = await fetch('/api/prompt/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: text})
+    });
+    if (!resp.ok) throw new Error('Błąd zapisu promptu');
+    showToast('Prompt zapisany pomyślnie!');
+  } catch (err) {
+    showToast('Błąd zapisu: ' + err.message, true);
+  }
+}
+
+async function resetPromptToDefault() {
+  if (!confirm('Czy na pewno chcesz przywrócić domyślny prompt? Twoje zmiany zostaną utracone.')) return;
+  try {
+    const resp = await fetch('/api/prompt/reset', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    });
+    if (!resp.ok) throw new Error('Błąd resetowania promptu');
+    const data = await resp.json();
+    const textarea = document.getElementById('promptEditorTextarea');
+    textarea.value = data.prompt || '';
+    updatePromptCharCount();
+    showToast('Prompt przywrócony do domyślnego');
+  } catch (err) {
+    showToast('Błąd resetowania: ' + err.message, true);
+  }
+}
+
+// Attach character count listener
+document.addEventListener('DOMContentLoaded', function() {
+  const ta = document.getElementById('promptEditorTextarea');
+  if (ta) ta.addEventListener('input', updatePromptCharCount);
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // UPLOAD & TRANSCRIPTION
 // ══════════════════════════════════════════════════════════════════════════════
 
-let uploadFile = null;
-let currentJobId = null;
-let pollInterval = null;
+
 let newTranscriptFile = null;
+
 
 function toggleUploadPanel(){
   document.getElementById('uploadOverlay').style.display = 'flex';
@@ -2622,7 +3013,6 @@ function toggleUploadPanel(){
 
 function closeUploadPanel(){
   document.getElementById('uploadOverlay').style.display = 'none';
-  if(pollInterval){ clearInterval(pollInterval); pollInterval = null; }
 }
 
 function resetUploadPanel(){
@@ -2630,14 +3020,15 @@ function resetUploadPanel(){
   document.getElementById('uploadProgress').style.display = 'none';
   document.getElementById('uploadDone').style.display = 'none';
   document.getElementById('uploadError').style.display = 'none';
-  document.getElementById('uploadFileName').style.display = 'none';
+  document.getElementById('uploadFileList').innerHTML = '';
   document.getElementById('btnStartTranscribe').disabled = true;
   document.getElementById('uploadProgressSteps').innerHTML = '';
-  uploadFile = null;
+  uploadFiles = [];
   newTranscriptFile = null;
 }
 
-// Dropzone
+// Dropzone — multi-file
+let uploadFiles = [];
 const dropzone = document.getElementById('uploadDropzone');
 const fileInput = document.getElementById('uploadFileInput');
 
@@ -2647,103 +3038,69 @@ dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-ove
 dropzone.addEventListener('drop', e => {
   e.preventDefault();
   dropzone.classList.remove('drag-over');
-  if(e.dataTransfer.files.length > 0) selectFile(e.dataTransfer.files[0]);
+  if(e.dataTransfer.files.length > 0) selectFiles(e.dataTransfer.files);
 });
 fileInput.addEventListener('change', () => {
-  if(fileInput.files.length > 0) selectFile(fileInput.files[0]);
+  if(fileInput.files.length > 0) selectFiles(fileInput.files);
 });
 
-function selectFile(file){
-  uploadFile = file;
-  const nameEl = document.getElementById('uploadFileName');
-  nameEl.textContent = '📁 ' + file.name + ' (' + (file.size / (1024*1024)).toFixed(1) + ' MB)';
-  nameEl.style.display = 'block';
-  document.getElementById('btnStartTranscribe').disabled = false;
+function selectFiles(files){
+  uploadFiles = Array.from(files);
+  const listEl = document.getElementById('uploadFileList');
+  listEl.innerHTML = '';
+  uploadFiles.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'upload-file-item';
+    div.textContent = '📁 ' + f.name + ' (' + (f.size / (1024*1024)).toFixed(1) + ' MB)';
+    listEl.appendChild(div);
+  });
+  document.getElementById('btnStartTranscribe').disabled = uploadFiles.length === 0;
 }
 
 async function startUploadTranscription(){
-  if(!uploadFile) return;
+  if(!uploadFiles || uploadFiles.length === 0) return;
 
-  // Show progress
-  document.getElementById('uploadForm').style.display = 'none';
-  document.getElementById('uploadProgress').style.display = 'block';
-  document.getElementById('uploadProgressBar').style.width = '0%';
-  document.getElementById('uploadProgressPct').textContent = '0%';
-  document.getElementById('uploadProgressMsg').textContent = 'Przesyłanie pliku na serwer...';
-
-  const formData = new FormData();
-  formData.append('file', uploadFile);
-  formData.append('model', document.getElementById('uploadModel').value);
-  formData.append('device', document.getElementById('uploadDevice').value);
-  formData.append('batch_size', '4');
-  formData.append('use_ollama', document.getElementById('uploadOllama').checked ? 'true' : 'false');
-
+  const model = document.getElementById('uploadModel').value;
+  const device = document.getElementById('uploadDevice').value;
   const minSp = document.getElementById('uploadMinSpeakers').value;
   const maxSp = document.getElementById('uploadMaxSpeakers').value;
-  if(minSp) formData.append('min_speakers', minSp);
-  if(maxSp) formData.append('max_speakers', maxSp);
+  const useOllama = document.getElementById('uploadOllama').checked ? 'true' : 'false';
 
-  try {
-    const resp = await fetch('/api/upload-transcribe', {
-      method: 'POST',
-      body: formData
-    });
-    if(!resp.ok){
-      const err = await resp.json();
-      throw new Error(err.error || 'Błąd serwera');
-    }
-    const data = await resp.json();
-    currentJobId = data.job_id;
+  document.getElementById('uploadForm').style.display = 'none';
+  document.getElementById('uploadProgress').style.display = 'block';
+  document.getElementById('uploadProgressMsg').textContent = 'Przesyłanie plików...';
+  document.getElementById('uploadProgressBar').style.width = '0%';
+  document.getElementById('uploadProgressPct').textContent = '0%';
 
-    // Start polling for progress
-    document.getElementById('uploadProgressMsg').textContent = 'Transkrypcja uruchomiona...';
-    document.getElementById('uploadProgressBar').style.width = '5%';
-    document.getElementById('uploadProgressPct').textContent = '5%';
+  let successCount = 0;
+  for(let i = 0; i < uploadFiles.length; i++){
+    const file = uploadFiles[i];
+    const pct = Math.round(((i+1) / uploadFiles.length) * 100);
+    document.getElementById('uploadProgressMsg').textContent = `Przesyłanie ${i+1}/${uploadFiles.length}: ${file.name}`;
+    document.getElementById('uploadProgressBar').style.width = pct + '%';
+    document.getElementById('uploadProgressPct').textContent = pct + '%';
 
-    pollInterval = setInterval(pollJobStatus, 1500);
-  } catch(err){
-    showUploadError(err.message);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('model', model);
+    formData.append('device', device);
+    formData.append('batch_size', '4');
+    formData.append('use_ollama', useOllama);
+    if(minSp) formData.append('min_speakers', minSp);
+    if(maxSp) formData.append('max_speakers', maxSp);
+
+    try {
+      const resp = await fetch('/api/upload-transcribe', { method: 'POST', body: formData });
+      if(resp.ok) successCount++;
+    } catch(e) { /* continue */ }
   }
-}
 
-async function pollJobStatus(){
-  if(!currentJobId) return;
-  try{
-    const resp = await fetch(`/api/job-status?id=${encodeURIComponent(currentJobId)}`);
-    if(!resp.ok) return;
-    const job = await resp.json();
-
-    const bar = document.getElementById('uploadProgressBar');
-    const pct = document.getElementById('uploadProgressPct');
-    const msg = document.getElementById('uploadProgressMsg');
-    const steps = document.getElementById('uploadProgressSteps');
-
-    bar.style.width = job.progress + '%';
-    pct.textContent = job.progress + '%';
-    msg.textContent = job.message || '';
-
-    // Add step to log
-    if(job.message){
-      const last = steps.lastElementChild;
-      if(!last || last.textContent !== job.message){
-        const div = document.createElement('div');
-        div.textContent = job.message;
-        steps.appendChild(div);
-        steps.scrollTop = steps.scrollHeight;
-      }
-    }
-
-    if(job.status === 'done'){
-      clearInterval(pollInterval); pollInterval = null;
-      newTranscriptFile = job.result;
-      document.getElementById('uploadProgress').style.display = 'none';
-      document.getElementById('uploadDone').style.display = 'block';
-    } else if(job.status === 'error'){
-      clearInterval(pollInterval); pollInterval = null;
-      showUploadError(job.message);
-    }
-  } catch(e){
-    // Ignore network glitches during polling
+  // Done uploading — close and open queue
+  closeUploadPanel();
+  resetUploadPanel();
+  openQueuePanel();
+  if(successCount > 0){
+    showToast(`✅ ${successCount} plik(ów) dodano do kolejki transkrypcji`);
   }
 }
 
@@ -2757,11 +3114,9 @@ function showUploadError(msg){
 
 async function loadNewTranscription(){
   closeUploadPanel();
-  // Reload list and open new transcript
   await loadTranscriptList();
   if(newTranscriptFile){
     const title = newTranscriptFile.replace(/\.json$/, '');
-    // Find audio file
     const listResp = await fetch('/api/list');
     const list = await listResp.json();
     const item = list.find(i => i.name === newTranscriptFile);
@@ -2771,62 +3126,239 @@ async function loadNewTranscription(){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PINNED POST (panel boczny do porównywania z transkrypcją)
+// QUEUE PANEL — polling + rendering job cards
 // ══════════════════════════════════════════════════════════════════════════════
 
-let pinnedPostIdx = null;
+let _queuePollInterval = null;
+let _queuePanelOpen = false;
+let _lastKnownDoneJobs = new Set(); // ids of jobs we've already notified for
 
-function pinPost(idx){
-  pinnedPostIdx = idx;
-  const panel = document.getElementById('pinnedPostPanel');
-  const label = document.getElementById('pinnedPostLabel');
-  const textEl = document.getElementById('pinnedPostText');
-
-  label.textContent = `📌 Post #${idx+1}`;
-  textEl.textContent = generatedPosts[idx].text;
-  panel.classList.add('visible');
-
-  // Scroll do źródła w transkrypcji
-  const firstHl = document.querySelector(`.w[data-post-idx="${idx}"]`);
-  if(firstHl) firstHl.scrollIntoView({behavior:'smooth', block:'center'});
-
-  // Sync edits back
-  textEl.onblur = () => {
-    if(pinnedPostIdx !== null){
-      generatedPosts[pinnedPostIdx].text = textEl.textContent.trim();
-      // Update card text too
-      const card = document.querySelector(`.post-card[data-idx="${pinnedPostIdx}"] .post-text`);
-      if(card) card.textContent = generatedPosts[pinnedPostIdx].text;
-    }
-  };
-}
-
-function unpinPost(){
-  const panel = document.getElementById('pinnedPostPanel');
-  panel.classList.remove('visible');
-  // Sync final text
-  if(pinnedPostIdx !== null){
-    const textEl = document.getElementById('pinnedPostText');
-    generatedPosts[pinnedPostIdx].text = textEl.textContent.trim();
-    const card = document.querySelector(`.post-card[data-idx="${pinnedPostIdx}"] .post-text`);
-    if(card) card.textContent = generatedPosts[pinnedPostIdx].text;
+function openQueuePanel(){
+  document.getElementById('queueOverlay').style.display = 'flex';
+  _queuePanelOpen = true;
+  refreshQueue();
+  if(!_queuePollInterval){
+    _queuePollInterval = setInterval(refreshQueue, 2000);
   }
-  pinnedPostIdx = null;
 }
 
-function copyPinnedPost(){
-  if(pinnedPostIdx === null) return;
-  const textEl = document.getElementById('pinnedPostText');
-  navigator.clipboard.writeText(textEl.textContent.trim());
-  showToast('Skopiowano przypięty post!');
+function closeQueuePanel(){
+  document.getElementById('queueOverlay').style.display = 'none';
+  _queuePanelOpen = false;
+  // Keep polling in background for badge updates
 }
 
-function acceptPinnedPost(){
-  if(pinnedPostIdx === null) return;
-  generatedPosts[pinnedPostIdx].status = 'accepted';
-  generatedPosts[pinnedPostIdx].text = document.getElementById('pinnedPostText').textContent.trim();
+function handleQueueOverlayClick(e){
+  if(e.target === document.getElementById('queueOverlay')) closeQueuePanel();
+}
+
+async function refreshQueue(){
+  try {
+    const resp = await fetch('/api/queue');
+    if(!resp.ok) return;
+    const jobs = await resp.json();
+    updateQueueBadge(jobs);
+    if(_queuePanelOpen) renderQueueJobs(jobs);
+    notifyNewDone(jobs);
+  } catch(e){ /* ignore */ }
+}
+
+function updateQueueBadge(jobs){
+  const active = jobs.filter(j => j.status === 'queued' || j.status === 'running').length;
+  const badge = document.getElementById('queueBadge');
+  if(active > 0){
+    badge.textContent = active;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function notifyNewDone(jobs){
+  jobs.forEach(j => {
+    if(j.status === 'done' && !_lastKnownDoneJobs.has(j.id)){
+      _lastKnownDoneJobs.add(j.id);
+      const name = (j.name || j.id).replace(/\.[^.]+$/, '');
+      showToast(`✅ Transkrypcja gotowa: ${name}`);
+      loadTranscriptList(); // refresh sidebar
+    }
+  });
+}
+
+const STATUS_ICON = { queued:'⏳', running:'🔄', done:'✅', error:'❌', cancelled:'🚫' };
+const STATUS_LABEL = { queued:'W kolejce', running:'W toku', done:'Gotowe', error:'Błąd', cancelled:'Anulowano' };
+
+function renderQueueJobs(jobs){
+  const body = document.getElementById('queueBody');
+  if(!jobs || jobs.length === 0){
+    body.innerHTML = '<div class="queue-empty">Brak zadań w kolejce lub historii</div>';
+    return;
+  }
+  body.innerHTML = '';
+  jobs.forEach(job => {
+    const card = document.createElement('div');
+    card.className = `job-card status-${job.status}`;
+    const icon = STATUS_ICON[job.status] || '⏳';
+    const label = STATUS_LABEL[job.status] || job.status;
+    const name = (job.name || job.id || '').replace(/\.[^.]+$/, '');
+    const pct = job.progress || 0;
+    const msg = (job.message || '').substring(0, 200);
+    const spinIcon = job.status === 'running' ? `<span class="spin">${icon}</span>` : icon;
+
+    let actionsHTML = '';
+    if(job.status === 'queued'){
+      actionsHTML = `<button class="job-action-btn danger" onclick="cancelJob('${job.id}')">Anuluj</button>`;
+    } else if(job.status === 'done' && job.result){
+      actionsHTML = `<button class="job-action-btn primary" onclick="openJobResult('${job.result}')">Otwórz wynik</button>`;
+    } else if(job.status === 'error'){
+      const logText = job.log ? job.log.join('\\n') : '';
+      if(logText) actionsHTML = `<button class="job-action-btn" onclick="showJobLog(this, ${JSON.stringify(logText)})">📋 Pokaż logi</button>`;
+    }
+
+    card.innerHTML = `
+      <div class="job-card-top">
+        <span class="job-status-icon">${spinIcon}</span>
+        <span class="job-name" title="${name}">${name}</span>
+        <span class="job-status-label">${label}</span>
+      </div>
+      <div class="job-progress-bar-outer">
+        <div class="job-progress-bar-inner" style="width:${pct}%"></div>
+      </div>
+      <div class="job-msg">${pct}% — ${msg}</div>
+      ${actionsHTML ? `<div class="job-actions">${actionsHTML}</div>` : ''}
+    `;
+    body.appendChild(card);
+  });
+}
+
+async function cancelJob(jobId){
+  try {
+    await fetch('/api/queue/cancel', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: jobId})
+    });
+    refreshQueue();
+  } catch(e) { showToast('Błąd anulowania zadania'); }
+}
+
+async function openJobResult(jsonFile){
+  closeQueuePanel();
+  await loadTranscriptList();
+  const listResp = await fetch('/api/list');
+  const list = await listResp.json();
+  const item = list.find(i => i.name === jsonFile);
+  const audioFile = item ? item.audio : '';
+  const title = jsonFile.replace(/\.json$/, '');
+  await loadTranscript(jsonFile, audioFile, title);
+}
+
+function showJobLog(btn, logText){
+  const existing = btn.nextElementSibling;
+  if(existing && existing.classList.contains('job-log-box')){
+    existing.remove(); return;
+  }
+  const pre = document.createElement('pre');
+  pre.className = 'job-log-box';
+  pre.style.cssText = 'font-size:0.7rem;color:var(--text-dim);background:rgba(0,0,0,0.3);border-radius:6px;padding:8px;margin-top:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto';
+  pre.textContent = logText;
+  btn.parentElement.appendChild(pre);
+}
+
+// Start background queue polling even when panel is closed (for badge + toasts)
+setInterval(async () => {
+  if(_queuePanelOpen) return; // already handled by openQueuePanel interval
+  try {
+    const resp = await fetch('/api/queue');
+    if(!resp.ok) return;
+    const jobs = await resp.json();
+    updateQueueBadge(jobs);
+    notifyNewDone(jobs);
+  } catch(e){}
+}, 5000);
+
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PINNED POSTS (multi-pin panel — max 10 posts)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let pinnedPosts = [];  // max 10, ordered by pin time; each entry: { postIndex, postText }
+
+function isPinned(postIndex) {
+  return pinnedPosts.some(p => p.postIndex === postIndex);
+}
+
+function pinPost(postIndex, postText) {
+  if (isPinned(postIndex)) return; // idempotent
+  if (pinnedPosts.length >= 10) {
+    showToast('Maksymalnie 10 przypiętych postów');
+    return;
+  }
+  // If postText not provided, try to get from generatedPosts
+  const text = postText !== undefined ? postText : (generatedPosts[postIndex] ? generatedPosts[postIndex].text : '');
+  pinnedPosts.push({ postIndex, postText: text });
+  renderPinnedPanel();
+  renderPosts(); // update pin button states
+}
+
+function unpinPost(postIndex) {
+  pinnedPosts = pinnedPosts.filter(p => p.postIndex !== postIndex);
+  renderPinnedPanel();
+  renderPosts(); // update pin button states
+}
+
+function unpinAllPosts() {
+  pinnedPosts = [];
+  renderPinnedPanel();
   renderPosts();
-  showToast('Post zaakceptowany!');
+}
+
+function renderPinnedPanel() {
+  const panel = document.getElementById('pinnedPostPanel');
+  const body = document.getElementById('pinnedPostBody');
+
+  if (pinnedPosts.length === 0) {
+    panel.classList.remove('visible');
+    body.innerHTML = '';
+    return;
+  }
+
+  panel.classList.add('visible');
+  body.innerHTML = '';
+
+  pinnedPosts.forEach((pin, displayIdx) => {
+    const item = document.createElement('div');
+    item.className = 'pinned-post-item';
+
+    const header = document.createElement('div');
+    header.className = 'pinned-post-item-header';
+
+    const idxSpan = document.createElement('span');
+    idxSpan.className = 'pinned-idx';
+    idxSpan.textContent = `${displayIdx + 1}.`;
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'pinned-post-label';
+    labelSpan.textContent = `Post #${pin.postIndex + 1}`;
+
+    const unpinBtn = document.createElement('button');
+    unpinBtn.className = 'pinned-unpin-btn';
+    unpinBtn.textContent = '✕';
+    unpinBtn.title = 'Odpnij';
+    unpinBtn.addEventListener('click', () => unpinPost(pin.postIndex));
+
+    header.append(idxSpan, labelSpan, unpinBtn);
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'pinned-post-text';
+    // Use latest text from generatedPosts if available
+    const currentText = generatedPosts[pin.postIndex] ? generatedPosts[pin.postIndex].text : pin.postText;
+    textDiv.textContent = currentText;
+
+    item.append(header, textDiv);
+    body.appendChild(item);
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3136,9 +3668,57 @@ function rejectSpeakerResult() {
 # Server logic
 # ──────────────────────────────────────────────────────────────────────────────
 
-# ── Transcription job tracking ────────────────────────────────────────────────
-_transcription_jobs = {}  # job_id -> {status, progress, message, result}
+# ── Transcription job tracking & FIFO queue ──────────────────────────────────
+import collections
+
+_transcription_jobs = {}          # job_id -> {status, progress, message, result, name, queued_at, log}
+_job_queue = collections.deque()  # FIFO list of job_ids
 _job_lock = threading.Lock()
+_queue_worker_started = False
+
+
+def _ensure_queue_worker():
+    """Start the singleton background worker thread if not already running."""
+    global _queue_worker_started
+    with _job_lock:
+        if _queue_worker_started:
+            return
+        _queue_worker_started = True
+    t = threading.Thread(target=_queue_worker, daemon=True)
+    t.start()
+
+
+def _queue_worker():
+    """Single worker that processes jobs from _job_queue one at a time."""
+    while True:
+        job_id = None
+        with _job_lock:
+            if _job_queue:
+                job_id = _job_queue[0]  # peek
+        if job_id is None:
+            time.sleep(0.5)
+            continue
+        # Check if already running (shouldn't happen, but guard)
+        with _job_lock:
+            job = _transcription_jobs.get(job_id, {})
+            if job.get('status') not in ('queued',):
+                _job_queue.popleft()
+                continue
+            # Mark as running
+            _transcription_jobs[job_id]['status'] = 'running'
+            _transcription_jobs[job_id]['started_at'] = time.time()
+        try:
+            args = _transcription_jobs[job_id].get('_args', ())
+            _run_transcription_job(job_id, *args)
+        except Exception as e:
+            with _job_lock:
+                _transcription_jobs[job_id]['status'] = 'error'
+                _transcription_jobs[job_id]['message'] = f'Nieoczekiwany błąd workera: {e}'
+        finally:
+            with _job_lock:
+                if _job_queue and _job_queue[0] == job_id:
+                    _job_queue.popleft()
+                _transcription_jobs[job_id]['ended_at'] = time.time()
 
 
 def _run_transcription_job(
@@ -3153,16 +3733,24 @@ def _run_transcription_job(
     max_speakers,
     use_ollama,
 ):
-    """Run transcription in a background thread, updating progress."""
+    """Run transcription sequentially (called by _queue_worker), updating progress."""
     import shutil
+
+    output_log = []  # Capture last lines of subprocess output for error reporting
 
     def update(progress, message, status="running"):
         with _job_lock:
+            prev = _transcription_jobs.get(job_id, {})
             _transcription_jobs[job_id] = {
                 "status": status,
                 "progress": progress,
                 "message": message,
-                "result": _transcription_jobs.get(job_id, {}).get("result", None),
+                "result": prev.get("result", None),
+                "name": prev.get("name", os.path.basename(audio_path)),
+                "queued_at": prev.get("queued_at", time.time()),
+                "started_at": prev.get("started_at"),
+                "ended_at": prev.get("ended_at"),
+                "log": output_log[-80:],  # last 80 lines
             }
 
     try:
@@ -3282,16 +3870,19 @@ def _run_transcription_job(
                 break
             if line:
                 line_stripped = line.strip()
+                clean = re.sub(r"\033\[[0-9;]*m", "", line_stripped)
+                output_log.append(clean)
                 for keyword, pct in progress_map.items():
                     if keyword in line_stripped:
-                        # Clean ANSI codes for message
-                        clean = re.sub(r"\033\[[0-9;]*m", "", line_stripped)
                         update(pct, clean)
                         break
 
         rc = process.poll()
         if rc != 0:
-            update(0, f"Transkrypcja zakończyła się błędem (kod: {rc})", "error")
+            # Provide last few lines of output for debugging
+            tail = output_log[-6:] if output_log else []
+            tail_str = ' | '.join(tail) if tail else 'brak szczegółów'
+            update(0, f"Błąd (kod: {rc}) — {tail_str}", "error")
             return
 
         # Success
@@ -3312,6 +3903,77 @@ def _run_transcription_job(
 
     except Exception as e:
         update(0, f"Nieoczekiwany błąd: {str(e)}", "error")
+
+
+# ── Prompt Config Store ─────────────────────────────────────────────
+_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROMPT_CONFIG_PATH = os.path.join(_PROJECT_DIR, "prompt_config.json")
+
+DEFAULT_PROMPT = """Jesteś redaktorem postów. Dostajesz GOTOWE fragmenty tekstu.
+Twoje JEDYNE zadanie:
+1. Usuń jąknięcia (yyy, eee, uhm) i urwane słowa/zdania.
+2. Przepisz tekst DOSŁOWNIE (minus jąknięcia i urwane zdania).
+
+ABSOLUTNE ZAKAZY:
+- NIE zmieniaj słów! Kopiuj DOSŁOWNIE (minus jąknięcia).
+- NIE dodawaj swoich zdań/komentarzy/opinii!
+- NIE streszczaj!
+- NIE skracaj — przepisz cały blok!
+- Jeśli zdanie jest urwane — po prostu je pomiń.
+
+Pomiędzy poszczególnymi postami zostaw podwójną nową linię."""
+
+
+def _load_active_prompt() -> str:
+    """Load the active system prompt for post generation.
+
+    Returns the custom prompt from prompt_config.json if it exists and has
+    a non-empty 'custom_prompt' field. Otherwise returns DEFAULT_PROMPT.
+    """
+    try:
+        if os.path.isfile(_PROMPT_CONFIG_PATH):
+            with open(_PROMPT_CONFIG_PATH, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            custom_prompt = config.get("custom_prompt")
+            if custom_prompt:
+                return custom_prompt
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"\033[93m[WARN] Nie można odczytać prompt_config.json: {e}\033[0m")
+    return DEFAULT_PROMPT
+
+
+def inject_tags(raw_posts_text: str, username: str, program: str, hashtags: list) -> list:
+    """Split AI response into individual posts and apply tag prefix + hashtag suffixes.
+
+    - Splits raw_posts_text by double newline into individual posts.
+    - Prepends "💬 {username} w {program}: " if not already present (idempotent).
+    - Appends " {hashtag}" for each hashtag if not already ending with it (idempotent).
+    - Uses username/program values verbatim (no case modification).
+    - Returns list of processed post strings.
+    """
+    posts = [p.strip() for p in raw_posts_text.split("\n\n") if p.strip()]
+
+    prefix = f"💬 {username} w {program}: "
+
+    processed = []
+    for post in posts:
+        # Prepend prefix if not already present (idempotent)
+        if not post.startswith(prefix):
+            post = prefix + post
+
+        # Append each hashtag if not already present as a suffix token (idempotent)
+        # Build the full expected suffix to check for idempotence
+        for hashtag in hashtags:
+            suffix = f" {hashtag}"
+            # Check if this hashtag already appears after the post body
+            # Using 'in' to detect the hashtag anywhere ensures idempotence
+            # even with multiple hashtags
+            if suffix not in post:
+                post = post + suffix
+
+        processed.append(post)
+
+    return processed
 
 
 class TranscriptHandler(http.server.BaseHTTPRequestHandler):
@@ -3352,6 +4014,12 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/job-status":
             job_id = query.get("id", [None])[0]
             self._serve_job_status(job_id)
+        elif path == "/api/queue":
+            self._serve_queue()
+        elif path == "/api/posts":
+            self._serve_posts(query)
+        elif path == "/api/prompt":
+            self._serve_prompt()
         elif path.startswith("/audio/"):
             filename = urllib.parse.unquote(path[7:])  # remove "/audio/"
             self._serve_audio(filename)
@@ -3372,14 +4040,24 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._generate_posts()
         elif path == "/api/save-posts":
             self._save_posts()
+        elif path == "/api/posts/save":
+            self._save_posts_json()
+        elif path == "/api/posts/update":
+            self._update_post()
         elif path == "/api/save-post-feedback":
             self._save_post_feedback()
+        elif path == "/api/prompt/save":
+            self._save_prompt()
+        elif path == "/api/prompt/reset":
+            self._reset_prompt()
         elif path == "/api/upload-transcribe":
             self._upload_and_transcribe()
         elif path == "/api/transcribe-youtube":
             self._transcribe_youtube()
         elif path == "/api/find-speaker":
             self._find_speaker()
+        elif path == "/api/queue/cancel":
+            self._cancel_queue_job()
         elif path == "/api/transcribe-youtube":
             self._transcribe_youtube()
         elif path == "/api/find-speaker":
@@ -3439,20 +4117,32 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
     def _serve_list(self):
         cls = self.__class__
         files = []
+        # Suffixes that are NOT standalone transcripts — hide from sidebar
+        _SKIP_SUFFIXES = (
+            "_state.json",
+            "_posty.json",
+            "_summary.json",
+            "_ollama_edited.json",
+            "_posts.json",
+        )
         if os.path.isdir(cls.transcript_dir):
             for f in os.listdir(cls.transcript_dir):
-                if f.endswith(".json") and not f.endswith("_state.json"):
-                    json_path = os.path.join(cls.transcript_dir, f)
-                    audio_path = find_audio_for_json(json_path, cls.transcript_dir)
-                    files.append(
-                        {
-                            "name": f,
-                            "title": os.path.splitext(f)[0],
-                            "audio": os.path.basename(audio_path) if audio_path else "",
-                        }
-                    )
+                if not f.endswith(".json"):
+                    continue
+                if any(f.endswith(suf) for suf in _SKIP_SUFFIXES):
+                    continue
+                json_path = os.path.join(cls.transcript_dir, f)
+                audio_path = find_audio_for_json(json_path, cls.transcript_dir)
+                files.append(
+                    {
+                        "name": f,
+                        "title": os.path.splitext(f)[0],
+                        "audio": os.path.basename(audio_path) if audio_path else "",
+                    }
+                )
         # Sort alphabetically by title
         files.sort(key=lambda x: x["title"])
+
 
         payload = json.dumps(files, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
@@ -3676,17 +4366,18 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         job_id = f"job_{int(time.time() * 1000)}"
         with _job_lock:
             _transcription_jobs[job_id] = {
-                'status': 'running', 'progress': 5,
-                'message': 'Audio pobrane z YouTube, uruchamianie transkrypcji...',
-                'result': None
+                'status': 'queued', 'progress': 0,
+                'message': 'Audio pobrane z YouTube, czeka w kolejce...',
+                'result': None,
+                'name': base_name,
+                'queued_at': time.time(),
+                'started_at': None,
+                'ended_at': None,
+                'log': [],
+                '_args': (dest_path, cls.transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama),
             }
-
-        t = threading.Thread(
-            target=_run_transcription_job,
-            args=(job_id, dest_path, cls.transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama),
-            daemon=True
-        )
-        t.start()
+            _job_queue.append(job_id)
+        _ensure_queue_worker()
 
         payload = json.dumps({"job_id": job_id, "base_name": base_name}).encode('utf-8')
         self.send_response(200)
@@ -3834,6 +4525,7 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
         osoba = params.get("osoba", "Dorota Spyrka")
         username = params.get("username", "@dorota_spyrka")
         program = params.get("program", "@OficjalneZero")
+        hashtags = params.get("hashtags", ["#RAZEMwMEDIACH"])
         num_posts = params.get("num_posts", 5)
         temperature = float(params.get("temperature", 0.0))
         speaker_filter = params.get("speaker_filter", "")
@@ -3900,7 +4592,8 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
 
         # ──────────────────────────────────────────────────────────────
         # STRATEGIA: Backend PROGRAMISTYCZNIE wycina fragmenty tekstu,
-        # a model TYLKO czyści jąknięcia i formatuje nagłówek/hashtag.
+        # model TYLKO czyści jąknięcia. Nagłówki i hashtagi dodaje
+        # Tag Injector po otrzymaniu odpowiedzi od AI.
         # Eliminuje halucynacje w małych modelach (8B).
         # ──────────────────────────────────────────────────────────────
 
@@ -3934,23 +4627,11 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
         for i, block in enumerate(selected, 1):
             blocks_text += f"\n[BLOK {i}]: {block}\n"
 
-        system_prompt = f"""Jesteś redaktorem postów. Dostajesz GOTOWE fragmenty tekstu.
-Twoje JEDYNE zadanie:
-1. Usuń jąknięcia (yyy, eee, uhm) i urwane słowa/zdania.
-2. Na samym początku dodaj nagłówek w osobnym wierszu: 💬 {username} w {program}:
-3. Po tym nagłówku dodaj pusty wiersz (znaki nowej linii), tak aby cytat zaczynał się w kolejnym wierszu.
-4. Po cytacie dodaj kolejny pusty wiersz (znaki nowej linii) i w ostatnim wierszu wstaw hashtag: #RAZEMwMEDIACH
+        # Load active prompt: custom from prompt_config.json or built-in default
+        base_prompt = _load_active_prompt()
+        system_prompt = f"{base_prompt}{example_section}{feedback_section}"
 
-ABSOLUTNE ZAKAZY:
-- NIE zmieniaj słów! Kopiuj DOSŁOWNIE (minus jąknięcia).
-- NIE dodawaj swoich zdań/komentarzy/opinii!
-- NIE streszczaj!
-- NIE skracaj — przepisz cały blok!
-- Jeśli zdanie jest urwane — po prostu je pomiń.
-
-Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_section}{feedback_section}"""
-
-        prompt = f"Oto {len(selected)} bloków do przetworzenia na posty. Przepisz każdy blok DOSŁOWNIE, dodając tylko nagłówek i hashtag:\n{blocks_text}"
+        prompt = f"Oto {len(selected)} bloków do przetworzenia na posty. Przepisz każdy blok DOSŁOWNIE (usuwając jedynie jąknięcia i urwane zdania):\n{blocks_text}"
 
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
@@ -3982,13 +4663,41 @@ Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_sectio
             result_text = resp.json().get("message", {}).get("content", "").strip()
             print(f"\033[92m[+] Wygenerowano posty pomyślnie.\033[0m")
 
-            # Parsowanie odpowiedzi i dodanie źródeł z oryginalnych bloków
-            posts_with_sources = self._parse_posts_with_sources(result_text)
+            # Apply Tag Injector — programmatically add prefix and hashtags (requirement 7.1)
+            tagged_posts = inject_tags(result_text, username, program, hashtags)
 
-            # Dodaj źródła — każdy post odpowiada blokowi, którego jest przepisaniem
-            for i, post in enumerate(posts_with_sources):
+            # Build posts_with_sources from tagged posts
+            posts_with_sources = []
+            for i, post_text in enumerate(tagged_posts):
+                post_entry = {"text": post_text, "sources": []}
                 if i < len(selected):
-                    post["sources"] = [selected[i]]
+                    post_entry["sources"] = [selected[i]]
+                posts_with_sources.append(post_entry)
+
+            # Auto-save generated posts to {base_name}_posty.json (requirement 5.1)
+            now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            posts_to_save = []
+            for post_entry in posts_with_sources:
+                text = post_entry["text"]
+                if len(text) > 1000:
+                    text = text[:1000]
+                posts_to_save.append({
+                    "text": text,
+                    "status": "pending",
+                    "created_at": now,
+                })
+
+            posts_json_path = os.path.join(cls.transcript_dir, f"{base}_posty.json")
+            try:
+                data = {
+                    "posts": posts_to_save[:50],  # Max 50 posts
+                    "generated_at": now,
+                }
+                with open(posts_json_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                print(f"\033[92m[+] Auto-zapisano {len(posts_to_save[:50])} postów do: {posts_json_path}\033[0m")
+            except OSError as e:
+                print(f"\033[93m[WARN] Nie udało się auto-zapisać postów: {e}\033[0m")
 
             payload = json.dumps(
                 {"posts": posts_with_sources}, ensure_ascii=False
@@ -4061,6 +4770,166 @@ Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_sectio
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    # ── API: GET /api/posts - Load posts for a transcript ──────────
+    def _serve_posts(self, query):
+        """Load posts from {base_name}_posty.json for a given transcript."""
+        cls = self.__class__
+        transcript_name = query.get("transcript", [None])[0]
+
+        if not transcript_name:
+            self._json_error(400, "Brak parametru 'transcript'.")
+            return
+
+        base = os.path.splitext(transcript_name)[0]
+        posts_path = os.path.join(cls.transcript_dir, f"{base}_posty.json")
+
+        if not os.path.isfile(posts_path):
+            # No posts file yet — return empty array (not an error)
+            self._json_ok({"posts": []})
+            return
+
+        try:
+            with open(posts_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            posts = data.get("posts", [])
+            self._json_ok({"posts": posts, "generated_at": data.get("generated_at", "")})
+        except (json.JSONDecodeError, OSError) as e:
+            self._json_error(500, f"Błąd odczytu pliku postów: {e}")
+
+    # ── API: POST /api/posts/save - Save posts for a transcript ────
+    def _save_posts_json(self):
+        """Save posts array to {base_name}_posty.json with validation."""
+        cls = self.__class__
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        transcript_name = params.get("transcript_name", "")
+        posts = params.get("posts", [])
+
+        if not transcript_name:
+            self._json_error(400, "Brak 'transcript_name'.")
+            return
+
+        # Validate max 50 posts
+        if len(posts) > 50:
+            self._json_error(400, "Maksymalnie 50 postów na transkrypcję.")
+            return
+
+        # Validate max 1000 chars each
+        for i, post in enumerate(posts):
+            text = post.get("text", "") if isinstance(post, dict) else str(post)
+            if len(text) > 1000:
+                self._json_error(400, f"Post {i+1} przekracza 1000 znaków.")
+                return
+
+        # Normalize posts to proper format
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        normalized_posts = []
+        for post in posts:
+            if isinstance(post, dict):
+                normalized_posts.append({
+                    "text": post.get("text", ""),
+                    "status": post.get("status", "pending"),
+                    "created_at": post.get("created_at", now),
+                })
+            else:
+                normalized_posts.append({
+                    "text": str(post),
+                    "status": "pending",
+                    "created_at": now,
+                })
+
+        base = os.path.splitext(transcript_name)[0]
+        posts_path = os.path.join(cls.transcript_dir, f"{base}_posty.json")
+
+        data = {
+            "posts": normalized_posts,
+            "generated_at": now,
+        }
+
+        try:
+            with open(posts_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"\033[92m[+] Zapisano {len(normalized_posts)} postów (JSON) do: {posts_path}\033[0m")
+            self._json_ok({"status": "success", "path": posts_path})
+        except OSError as e:
+            self._json_error(500, f"Błąd zapisu pliku postów: {e}")
+
+    # ── API: POST /api/posts/update - Update single post ───────────
+    def _update_post(self):
+        """Update a single post at a given index in the posts file."""
+        cls = self.__class__
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        transcript_name = params.get("transcript_name", "")
+        index = params.get("index")
+        new_text = params.get("text")
+        new_status = params.get("status")
+
+        if not transcript_name:
+            self._json_error(400, "Brak 'transcript_name'.")
+            return
+
+        if index is None or not isinstance(index, int):
+            self._json_error(400, "Brak lub nieprawidłowy 'index'.")
+            return
+
+        base = os.path.splitext(transcript_name)[0]
+        posts_path = os.path.join(cls.transcript_dir, f"{base}_posty.json")
+
+        # Load existing file
+        if not os.path.isfile(posts_path):
+            self._json_error(404, "Plik postów nie istnieje.")
+            return
+
+        try:
+            with open(posts_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            self._json_error(500, f"Błąd odczytu pliku postów: {e}")
+            return
+
+        posts = data.get("posts", [])
+
+        if index < 0 or index >= len(posts):
+            self._json_error(400, f"Index {index} poza zakresem (0-{len(posts)-1}).")
+            return
+
+        # Update the specific post
+        if new_text is not None:
+            if len(new_text) > 1000:
+                self._json_error(400, "Tekst posta przekracza 1000 znaków.")
+                return
+            posts[index]["text"] = new_text
+
+        if new_status is not None:
+            if new_status not in ("pending", "accepted", "rejected"):
+                self._json_error(400, "Nieprawidłowy status. Dozwolone: pending, accepted, rejected.")
+                return
+            posts[index]["status"] = new_status
+
+        data["posts"] = posts
+
+        try:
+            with open(posts_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self._json_ok({"status": "success", "post": posts[index]})
+        except OSError as e:
+            self._json_error(500, f"Błąd zapisu pliku postów: {e}")
 
     # ── Helper: JSON error response ────────────────────────────────
     def _json_error(self, code, message):
@@ -4174,33 +5043,33 @@ Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_sectio
         with open(upload_path, "wb") as f:
             f.write(file_data)
 
-        # Start background transcription
+        # Add to FIFO queue
         job_id = f"job_{int(time.time() * 1000)}"
         with _job_lock:
             _transcription_jobs[job_id] = {
-                "status": "running",
+                "status": "queued",
                 "progress": 0,
-                "message": "Przesyłanie pliku zakończone, uruchamianie...",
+                "message": "Czeka w kolejce...",
                 "result": None,
+                "name": safe_name,
+                "queued_at": time.time(),
+                "started_at": None,
+                "ended_at": None,
+                "log": [],
+                "_args": (
+                    upload_path,
+                    cls.transcript_dir,
+                    model,
+                    device,
+                    compute_type,
+                    batch_size,
+                    min_speakers,
+                    max_speakers,
+                    use_ollama,
+                ),
             }
-
-        t = threading.Thread(
-            target=_run_transcription_job,
-            args=(
-                job_id,
-                upload_path,
-                cls.transcript_dir,
-                model,
-                device,
-                compute_type,
-                batch_size,
-                min_speakers,
-                max_speakers,
-                use_ollama,
-            ),
-            daemon=True,
-        )
-        t.start()
+            _job_queue.append(job_id)
+        _ensure_queue_worker()
 
         payload = json.dumps({"job_id": job_id}).encode("utf-8")
         self.send_response(200)
@@ -4222,10 +5091,84 @@ Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_sectio
             self._json_error(404, "Nie znaleziono zadania o podanym ID.")
             return
 
-        payload = json.dumps(job, ensure_ascii=False).encode("utf-8")
+        # Don't expose internal _args
+        safe = {k: v for k, v in job.items() if not k.startswith('_')}
+        payload = json.dumps(safe, ensure_ascii=False).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    # ── API: Get all jobs in queue / history ───────────────────────
+    def _serve_queue(self):
+        with _job_lock:
+            queue_order = list(_job_queue)
+            jobs_copy = {k: {kk: vv for kk, vv in v.items() if not kk.startswith('_')}
+                         for k, v in _transcription_jobs.items()}
+
+        # Build ordered list: queued first (in order), then running, then done/error (newest first)
+        result = []
+        seen = set()
+
+        # Queued jobs in order
+        for jid in queue_order:
+            if jid in jobs_copy:
+                j = dict(jobs_copy[jid])
+                j['id'] = jid
+                result.append(j)
+                seen.add(jid)
+
+        # Running / done / error (not in queue)
+        rest = [(jid, j) for jid, j in jobs_copy.items() if jid not in seen]
+        rest.sort(key=lambda x: x[1].get('queued_at', 0), reverse=True)
+        for jid, j in rest:
+            entry = dict(j)
+            entry['id'] = jid
+            result.append(entry)
+
+        payload = json.dumps(result, ensure_ascii=False).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    # ── API: Cancel a queued job ────────────────────────────────────
+    def _cancel_queue_job(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body) if body else {}
+        except Exception:
+            self._json_error(400, 'Nieprawidłowe dane JSON.')
+            return
+
+        job_id = params.get('id', '').strip()
+        if not job_id:
+            self._json_error(400, 'Wymagany parametr: id')
+            return
+
+        with _job_lock:
+            job = _transcription_jobs.get(job_id)
+            if not job:
+                self._json_error(404, 'Nie znaleziono zadania.')
+                return
+            if job.get('status') != 'queued':
+                self._json_error(409, 'Można anulować tylko zadania ze statusem "queued".')
+                return
+            job['status'] = 'cancelled'
+            job['message'] = 'Anulowano przez użytkownika.'
+            if job_id in _job_queue:
+                try:
+                    _job_queue.remove(job_id)
+                except ValueError:
+                    pass
+
+        payload = json.dumps({'status': 'ok', 'cancelled': job_id}).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
@@ -4785,6 +5728,65 @@ Pomiędzy poszczególnymi postami zostaw podwójną nową linię.{example_sectio
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    # ── API: Prompt Config Store ────────────────────────────────────
+
+    def _serve_prompt(self):
+        """GET /api/prompt — return current prompt and whether it's custom."""
+        try:
+            if os.path.isfile(_PROMPT_CONFIG_PATH):
+                with open(_PROMPT_CONFIG_PATH, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                custom_prompt = config.get("custom_prompt")
+                if custom_prompt:
+                    self._json_ok({"prompt": custom_prompt, "is_custom": True})
+                    return
+        except (json.JSONDecodeError, OSError) as e:
+            # If config file is corrupted, fall through to default
+            print(f"\033[93m[WARN] Nie można odczytać prompt_config.json: {e}\033[0m")
+
+        self._json_ok({"prompt": DEFAULT_PROMPT, "is_custom": False})
+
+    def _save_prompt(self):
+        """POST /api/prompt/save — validate and persist custom prompt."""
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowe dane JSON.")
+            return
+
+        text = params.get("text", "")
+        if not isinstance(text, str) or len(text) == 0:
+            self._json_error(400, "Prompt nie może być pusty.")
+            return
+
+        if len(text) > 10000:
+            self._json_error(400, "Prompt nie może przekraczać 10000 znaków.")
+            return
+
+        try:
+            config = {
+                "custom_prompt": text,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            with open(_PROMPT_CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            self._json_ok({"status": "success"})
+        except OSError as e:
+            self._json_error(500, f"Błąd zapisu prompt_config.json: {str(e)}")
+
+    def _reset_prompt(self):
+        """POST /api/prompt/reset — delete custom prompt, return default."""
+        try:
+            if os.path.isfile(_PROMPT_CONFIG_PATH):
+                os.remove(_PROMPT_CONFIG_PATH)
+        except OSError as e:
+            self._json_error(500, f"Błąd usuwania prompt_config.json: {str(e)}")
+            return
+
+        self._json_ok({"status": "success", "prompt": DEFAULT_PROMPT})
 
     # ── Audio file (supports Range Requests) ────────────────────────
     def _serve_audio(self, filename):

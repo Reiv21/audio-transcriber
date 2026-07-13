@@ -22,6 +22,7 @@ env/
 *.swp
 *.swo
 *~
+tests/
 
 # Transcripts (user data, large audio files)
 transcripts/
