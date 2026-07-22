@@ -1688,6 +1688,11 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       <button class="queue-close" onclick="document.getElementById('screenshotOverlay').style.display='none'">&times;</button>
     </div>
     <div class="queue-body">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding:0 4px;">
+        <label style="font-size:0.75rem;color:var(--text-dim);font-weight:600;">Ilość:</label>
+        <input type="number" id="screenshotCount" value="3" min="1" max="10" style="width:60px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--text);font-size:0.85rem;">
+        <button class="btn-refresh" onclick="reloadScreenshots()">🔄 Odśwież</button>
+      </div>
       <div id="screenshotLoading" style="text-align:center; padding: 30px; color:var(--text-dim);">Pobieranie klatek z wideo... (to może potrwać kilka sekund)</div>
       <div id="screenshotError" style="display:none; color:#f87171; padding: 20px; text-align:center;"></div>
       <div class="screenshot-gallery" id="screenshotGallery" style="display:none;"></div>
@@ -2668,7 +2673,16 @@ function filterValidPost(post){
   const text = post.text || '';
   if(text.length < 5) return false;
   // Akceptuj posty zawierające marker emoji lub hashtag
-  return text.includes('💬') || text.includes('#RAZEMwMEDIACH');
+  if(!text.includes('💬') && !text.includes('#RAZEMwMEDIACH')) return false;
+  // Odrzuć posty bez treści (same tagi/prefix/hashtagi/mention-y)
+  const stripped = text
+    .replace(/💬/g, '')
+    .replace(/#\w+/g, '')
+    .replace(/@\w+/g, '')
+    .replace(/\bw\b/g, '')
+    .replace(/[:\s]+/g, ' ')
+    .trim();
+  return stripped.length > 20;
 }
 
 async function generatePosts() {
@@ -3768,14 +3782,30 @@ function rejectSpeakerResult() {
 }
 
 // ── Speaker Screenshots ───────────────────────────────────────────────
+let _screenshotSpeakerId = null;
+let _screenshotSpeakerNameStr = null;
+let _screenshotExcludedTimes = [];
+
 async function openScreenshotModal(speakerId, speakerNameStr) {
   if (!currentActiveName) return;
+  _screenshotSpeakerId = speakerId;
+  _screenshotSpeakerNameStr = speakerNameStr;
+  _screenshotExcludedTimes = [];
   document.getElementById('screenshotOverlay').style.display = 'flex';
   document.getElementById('screenshotSpeakerName').textContent = speakerNameStr;
+  await fetchScreenshots();
+}
 
+function reloadScreenshots() {
+  _screenshotExcludedTimes = [];
+  fetchScreenshots();
+}
+
+async function fetchScreenshots(excludeTimes) {
   const loadingEl = document.getElementById('screenshotLoading');
   const errorEl = document.getElementById('screenshotError');
   const galleryEl = document.getElementById('screenshotGallery');
+  const count = parseInt(document.getElementById('screenshotCount').value) || 3;
 
   loadingEl.style.display = 'block';
   errorEl.style.display = 'none';
@@ -3783,7 +3813,10 @@ async function openScreenshotModal(speakerId, speakerNameStr) {
   galleryEl.innerHTML = '';
 
   try {
-    const url = `/api/speaker-screenshots?name=${encodeURIComponent(currentActiveName)}&speaker=${encodeURIComponent(speakerId)}`;
+    let url = `/api/speaker-screenshots?name=${encodeURIComponent(currentActiveName)}&speaker=${encodeURIComponent(_screenshotSpeakerId)}&count=${count}`;
+    if (_screenshotExcludedTimes.length > 0) {
+      _screenshotExcludedTimes.forEach(t => { url += `&exclude_time=${t}`; });
+    }
     const resp = await fetch(url);
     const data = await resp.json();
 
@@ -3806,13 +3839,26 @@ async function openScreenshotModal(speakerId, speakerNameStr) {
         info.style.cssText = 'font-size:0.75rem; color:var(--text-dim); text-align:center;';
         info.textContent = `Pobrano z ${fmt(shot.time)}`;
 
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;justify-content:center;';
+
         const link = document.createElement('a');
         link.href = shot.base64;
-        link.download = `${currentActiveName.replace(/\.json$/, '')}_${speakerNameStr.replace(/[^A-Za-z0-9]/g, '_')}_${index+1}.jpg`;
+        link.download = `${currentActiveName.replace(/\.json$/, '')}_${_screenshotSpeakerNameStr.replace(/[^A-Za-z0-9]/g, '_')}_${index+1}.jpg`;
         link.className = 'screenshot-action';
         link.innerHTML = '⬇️ Pobierz';
 
-        card.append(img, info, link);
+        const replaceBtn = document.createElement('button');
+        replaceBtn.className = 'screenshot-action';
+        replaceBtn.innerHTML = '🔄 Wymień';
+        replaceBtn.title = 'Wylosuj inną klatkę zamiast tej';
+        replaceBtn.addEventListener('click', () => {
+          _screenshotExcludedTimes.push(shot.time);
+          fetchScreenshots();
+        });
+
+        btnRow.append(link, replaceBtn);
+        card.append(img, info, btnRow);
         galleryEl.appendChild(card);
       });
 
@@ -3915,6 +3961,7 @@ def _run_transcription_job(
     min_speakers,
     max_speakers,
     use_ollama,
+    language=None,
 ):
     """Run transcription sequentially (called by _queue_worker), updating progress."""
     import shutil
@@ -3937,6 +3984,22 @@ def _run_transcription_job(
             }
 
     try:
+        # Zwolnij model Ollama z GPU aby WhisperX miał VRAM
+        if device == "cuda":
+            try:
+                ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+                ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+                update(2, "Zwalnianie GPU (unload Ollama)...")
+                if http_requests:
+                    http_requests.post(
+                        f"{ollama_url}/api/generate",
+                        json={"model": ollama_model, "keep_alive": 0},
+                        timeout=10,
+                    )
+                    output_log.append("[INFO] Ollama model unloaded from VRAM")
+            except Exception:
+                output_log.append("[WARN] Nie udało się zwolnić Ollama z GPU (kontynuuję)")
+
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
 
         # Check if we need to convert
@@ -4021,6 +4084,8 @@ def _run_transcription_job(
             cmd.extend(["--max-speakers", str(max_speakers)])
         if use_ollama:
             cmd.append("--use-ollama")
+        if language:
+            cmd.extend(["--language", language])
 
         update(15, "Uruchamianie transkrypcji WhisperX...")
 
@@ -4131,6 +4196,7 @@ def inject_tags(raw_posts_text: str, username: str, program: str, hashtags: list
     - Splits raw_posts_text by double newline into individual posts.
     - Prepends "💬 {username} w {program}: " if not already present (idempotent).
     - Appends " {hashtag}" for each hashtag if not already ending with it (idempotent).
+    - Skips posts that have no meaningful content after tag injection.
     - Uses username/program values verbatim (no case modification).
     - Returns list of processed post strings.
     """
@@ -4145,14 +4211,18 @@ def inject_tags(raw_posts_text: str, username: str, program: str, hashtags: list
             post = prefix + post
 
         # Append each hashtag if not already present as a suffix token (idempotent)
-        # Build the full expected suffix to check for idempotence
         for hashtag in hashtags:
             suffix = f" {hashtag}"
-            # Check if this hashtag already appears after the post body
-            # Using 'in' to detect the hashtag anywhere ensures idempotence
-            # even with multiple hashtags
             if suffix not in post:
                 post = post + suffix
+
+        # Skip posts with no real content (only prefix + hashtags/mentions)
+        content = post.removeprefix(prefix)
+        for hashtag in hashtags:
+            content = content.replace(hashtag, "")
+        content = re.sub(r"@\w+", "", content).strip()
+        if len(content) < 20:
+            continue
 
         processed.append(post)
 
@@ -4206,7 +4276,9 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/speaker-screenshots":
             name = query.get("name", [None])[0]
             speaker = query.get("speaker", [None])[0]
-            self._serve_speaker_screenshots(name, speaker)
+            count = int(query.get("count", [3])[0])
+            exclude_times = query.get("exclude_time", [])
+            self._serve_speaker_screenshots(name, speaker, count, exclude_times)
         elif path.startswith("/audio/"):
             filename = urllib.parse.unquote(path[7:])  # remove "/audio/"
             self._serve_audio(filename)
@@ -4361,7 +4433,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     # ── API: Get speaker screenshots ──────────────────────────────────
-    def _serve_speaker_screenshots(self, name, speaker):
+    def _serve_speaker_screenshots(self, name, speaker, count=3, exclude_times=None):
         if not name or not speaker or "/" in name or "\\" in name:
             self._json_error(400, "Brak parametru name lub speaker.")
             return
@@ -4388,8 +4460,22 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
 
         # Sort segments by duration descending
         spk_segments.sort(key=lambda s: s["end"] - s["start"], reverse=True)
-        # Take up to 3 longest segments
-        best_segments = spk_segments[:3]
+
+        # Filter out excluded times (for "replace" feature)
+        excluded = set()
+        if exclude_times:
+            excluded = {float(t) for t in exclude_times}
+
+        # Pick segments whose midpoints aren't in excluded set
+        candidates = []
+        for seg in spk_segments:
+            mid = round((seg["start"] + seg["end"]) / 2.0, 2)
+            if not any(abs(mid - ex) < 0.5 for ex in excluded):
+                candidates.append(seg)
+
+        # Take up to count segments
+        count = max(1, min(count, 10))
+        best_segments = candidates[:count]
 
         import base64
         import subprocess
@@ -4634,7 +4720,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
                 'started_at': None,
                 'ended_at': None,
                 'log': [],
-                '_args': (dest_path, cls.transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama),
+                '_args': (dest_path, cls.transcript_dir, model, device, compute_type, batch_size, min_speakers, max_speakers, use_ollama, "pl"),
             }
             _job_queue.append(job_id)
         _ensure_queue_worker()
@@ -5236,6 +5322,7 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
         min_speakers = None
         max_speakers = None
         use_ollama = True
+        language = "pl"
 
         for part in parts:
             if b"Content-Disposition" not in part:
@@ -5292,6 +5379,9 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
                     pass
             elif name == "use_ollama":
                 use_ollama = content.decode().strip().lower() in ("true", "1", "yes")
+            elif name == "language":
+                lang_val = content.decode().strip()
+                language = lang_val if lang_val else "pl"
 
         if not file_data or not file_name:
             self._json_error(400, "Nie przesłano pliku audio/wideo.")
@@ -5326,6 +5416,7 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
                     min_speakers,
                     max_speakers,
                     use_ollama,
+                    language,
                 ),
             }
             _job_queue.append(job_id)
@@ -5581,6 +5672,7 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
                 min_speakers,
                 max_speakers,
                 use_ollama,
+                "pl",
             ),
             daemon=True,
         )
@@ -6171,20 +6263,34 @@ def find_audio_file(directory: str) -> str | None:
 
 
 def find_audio_for_json(json_path: str, directory: str) -> str | None:
-    """Find the corresponding audio file for a given transcript JSON file."""
+    """Find the corresponding audio/video file for a given transcript JSON file.
+    
+    Prefers video formats (.mp4, .mkv, .mov) over audio-only (.mp3, .wav)
+    so that screenshot extraction via ffmpeg works.
+    """
+    VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".mpeg", ".mpg"}
     base_name = os.path.splitext(os.path.basename(json_path))[0]
-    if os.path.isdir(directory):
-        for f in os.listdir(directory):
+
+    def _search_dir(d):
+        if not os.path.isdir(d):
+            return None
+        video_match = None
+        audio_match = None
+        for f in os.listdir(d):
             f_base, f_ext = os.path.splitext(f)
             if f_base == base_name and f_ext.lower() in AUDIO_EXTENSIONS:
-                return os.path.join(directory, f)
-        parent = os.path.dirname(os.path.abspath(directory))
-        if os.path.isdir(parent):
-            for f in os.listdir(parent):
-                f_base, f_ext = os.path.splitext(f)
-                if f_base == base_name and f_ext.lower() in AUDIO_EXTENSIONS:
-                    return os.path.join(parent, f)
-    return None
+                path = os.path.join(d, f)
+                if f_ext.lower() in VIDEO_EXTENSIONS:
+                    video_match = path
+                elif audio_match is None:
+                    audio_match = path
+        return video_match or audio_match
+
+    result = _search_dir(directory)
+    if result:
+        return result
+    parent = os.path.dirname(os.path.abspath(directory))
+    return _search_dir(parent)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

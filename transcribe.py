@@ -39,7 +39,8 @@ def transcribe_and_diarize(
     compute_type: str = "float16",
     min_speakers = None,
     max_speakers = None,
-    batch_size: int = 4
+    batch_size: int = 4,
+    language: str = None,
 ):
     """Główna funkcja transkrypcji i podziału na mówców za pomocą WhisperX."""
     print("[-] Ładowanie WhisperX...")
@@ -53,6 +54,8 @@ def transcribe_and_diarize(
         compute_type = "int8"
 
     print(f"[*] Wybrane urządzenie: {device.upper()} (Precyzja obliczeń: {compute_type})")
+    if language:
+        print(f"[*] Wymuszony język: {language}")
     
     # Krok 1: Wczytanie pliku audio
     print(f"[-] Wczytywanie pliku audio: {audio_path}")
@@ -63,8 +66,8 @@ def transcribe_and_diarize(
 
     # Krok 2: Transkrypcja podstawowa (Whisper)
     print(f"[-] Krok 1/4: Transkrypcja Whisper (model: {model_name})...")
-    model = whisperx.load_model(model_name, device, compute_type=compute_type)
-    result = model.transcribe(audio, batch_size=batch_size)
+    model = whisperx.load_model(model_name, device, compute_type=compute_type, language=language)
+    result = model.transcribe(audio, batch_size=batch_size, language=language)
     
     # Usunięcie modelu transkrypcji w celu zwolnienia pamięci VRAM
     print("[-] Zwalnianie pamięci VRAM po transkrypcji...")
@@ -303,6 +306,7 @@ def main():
     parser.add_argument("--min-speakers", type=int, default=None, help="Minimalna oczekiwana liczba mówców (opcjonalnie)")
     parser.add_argument("--max-speakers", type=int, default=None, help="Maksymalna oczekiwana liczba mówców (opcjonalnie)")
     parser.add_argument("--use-ollama", action="store_true", help="Użyj lokalnego modelu Ollama do ulepszenia tekstu i podsumowania")
+    parser.add_argument("-l", "--language", default=None, help="Wymuś język transkrypcji (np. 'pl', 'en'). Domyślnie: auto-detekcja")
     
     args = parser.parse_args()
 
@@ -328,7 +332,8 @@ def main():
             compute_type=args.compute_type,
             min_speakers=args.min_speakers,
             max_speakers=args.max_speakers,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            language=args.language,
         )
 
         # 2. Zapis wyników bazowych
