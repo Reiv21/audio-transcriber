@@ -39,6 +39,88 @@ except ImportError:
     pass
 
 # ──────────────────────────────────────────────────────────────────────────────
+# yt-dlp path resolution (checks venv/bin next to this script)
+# ──────────────────────────────────────────────────────────────────────────────
+import shutil as _shutil_top
+
+def _find_yt_dlp() -> str | None:
+    """Find yt-dlp: first in PATH, then in venv/bin/ next to this script."""
+    found = _shutil_top.which("yt-dlp")
+    if found:
+        return found
+    # Check local venv
+    venv_path = Path(__file__).resolve().parent / "venv" / "bin" / "yt-dlp"
+    if venv_path.is_file() and os.access(venv_path, os.X_OK):
+        return str(venv_path)
+    return None
+
+def _yt_dlp_cookies_args(url: str) -> list[str]:
+    """Return YouTube-specific yt-dlp args (cookies file, no-playlist, web_safari), empty list otherwise."""
+    import urllib.parse
+    host = urllib.parse.urlparse(url).netloc.lower().replace("www.", "")
+    if host in ("youtube.com", "youtu.be"):
+        cookies_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+        # -4 forces IPv4: YouTube returns 403 for GVS requests over IPv6 on many networks.
+        # web_safari gives HLS (1080p, no GVS token needed); mweb is fallback for
+        # videos where web_safari only returns storyboards. bgutil provides PO tokens.
+        args = ["-4", "--no-playlist", "--extractor-args", "youtube:player_client=web_safari,mweb"]
+        if os.path.isfile(cookies_file):
+            args += ["--cookies", cookies_file]
+        return args
+    return []
+
+
+def _clean_youtube_url(url: str) -> str:
+    """Strip playlist params (list, index) from YouTube URLs to avoid downloading entire playlists."""
+    import urllib.parse
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.netloc.lower().replace("www.", "")
+    if host not in ("youtube.com", "youtu.be"):
+        return url
+    qs = urllib.parse.parse_qs(parsed.query)
+    # Keep only 'v' (video ID) and 't' (timestamp) params
+    clean_qs = {k: v for k, v in qs.items() if k in ("v", "t")}
+    new_query = urllib.parse.urlencode(clean_qs, doseq=True)
+    return urllib.parse.urlunparse(parsed._replace(query=new_query))
+
+def build_concat_input(file_paths: list[str], input_txt_path: str) -> None:
+    """Write an ffmpeg concat demuxer input file listing all paths in order."""
+    with open(input_txt_path, "w") as f:
+        for path in file_paths:
+            escaped = path.replace("'", "'\\''")
+            f.write(f"file '{escaped}'\n")
+
+
+def _convert_to_cfr(input_path: str, fps: int = 30) -> str:
+    """Re-encode video to constant frame rate (CFR) for NLE compatibility.
+
+    Tries NVENC first, falls back to libx264. Returns path to CFR file
+    (replaces original). Raises on failure.
+    """
+    cfr_path = input_path + ".cfr.mp4"
+    # Try NVENC (GPU)
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", input_path,
+         "-c:v", "h264_nvenc", "-preset", "p4", "-r", str(fps),
+         "-vsync", "cfr", "-c:a", "copy", cfr_path],
+        capture_output=True, text=True, timeout=1200,
+    )
+    if result.returncode != 0:
+        # Fallback to libx264 (CPU)
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", input_path,
+             "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+             "-r", str(fps), "-vsync", "cfr", "-c:a", "copy", cfr_path],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg CFR conversion failed: {result.stderr[:200]}")
+    # Replace original with CFR version
+    os.replace(cfr_path, input_path)
+    return input_path
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # HTML Template
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -168,6 +250,18 @@ body::before{
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.transcript-item-title input.rename-input {
+  all: unset;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-bright);
+  width: 100%;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--accent-0);
+  border-radius: 4px;
+  padding: 1px 4px;
+  box-sizing: border-box;
+}
 .transcript-item-meta {
   font-size: 0.7rem;
   color: var(--text-dim);
@@ -261,6 +355,60 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
 .player-card:hover{box-shadow:0 12px 48px rgba(0,0,0,0.4)}
 
 .player-row{display:flex;align-items:center;gap:14px}
+
+/* ── Sticky Mini Video Player (PiP) ─────────────────────────── */
+.video-pip{
+  position:fixed;
+  bottom:20px;
+  right:20px;
+  width:320px;
+  z-index:9999;
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 8px 32px rgba(0,0,0,0.6);
+  border:1px solid var(--border);
+  background:#000;
+  transition:width 0.2s,opacity 0.2s;
+  cursor:grab;
+}
+.video-pip video{
+  width:100%;
+  display:block;
+  border-radius:0;
+  margin:0;
+  max-height:none;
+}
+.video-pip .pip-close{
+  position:absolute;
+  top:6px;
+  right:6px;
+  background:rgba(0,0,0,0.7);
+  border:none;
+  color:#fff;
+  border-radius:50%;
+  width:24px;height:24px;
+  font-size:14px;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;
+  transition:opacity 0.15s;
+}
+.video-pip:hover .pip-close{opacity:1}
+.video-pip .pip-resize{
+  position:absolute;
+  bottom:6px;
+  left:6px;
+  background:rgba(0,0,0,0.7);
+  border:none;
+  color:#fff;
+  border-radius:4px;
+  padding:2px 6px;
+  font-size:11px;
+  cursor:pointer;
+  opacity:0;
+  transition:opacity 0.15s;
+}
+.video-pip:hover .pip-resize{opacity:1}
 
 /* Play / Pause */
 .btn-play{
@@ -369,6 +517,28 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
 @keyframes wordPulse{
   0%,100%{opacity:0.5;transform:scale(1)}
   50%{opacity:1;transform:scale(1.03)}
+}
+
+/* ── Performance-lite mode (auto-enabled when browser GPU/compositing is slow) ──
+   backdrop-filter blur is repainted on the CPU per-frame when hardware
+   acceleration is off; one blur layer per speaker block pins the CPU during
+   scroll + karaoke highlight. This strips the costly effects. */
+body.perf-lite .sidebar,
+body.perf-lite .player-card,
+body.perf-lite .speaker-section,
+body.perf-lite .menu-toggle,
+body.perf-lite .upload-overlay,
+body.perf-lite .queue-overlay{
+  backdrop-filter:none !important;
+  -webkit-backdrop-filter:none !important;
+}
+/* Solidify the panels that relied on blur so text stays readable */
+body.perf-lite .sidebar{background:#0e1016}
+body.perf-lite .player-card,
+body.perf-lite .speaker-section{background:#14161d}
+body.perf-lite .w.active::after{animation:none;opacity:0.6}
+@media (prefers-reduced-motion: reduce){
+  .w.active::after{animation:none}
 }
 
 /* ── Post source highlights ──────────────────────────────── */
@@ -1333,13 +1503,91 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
   cursor: zoom-out;
 }
 .lightbox-content {
-  max-width: 90%;
+  max-width: 80%;
   max-height: 90%;
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   cursor: default;
 }
+.lightbox-nav {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  margin: 0 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+}
+.lightbox-nav:hover { background: rgba(255,255,255,0.15); transform: scale(1.08); }
+.lightbox-nav:active { transform: scale(0.95); }
+
+/* ── Multi-select merge ──────────────────────────────────── */
+.transcript-item .merge-checkbox {
+  width: 16px; height: 16px;
+  accent-color: var(--accent-0);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.transcript-item:hover .merge-checkbox,
+.merge-mode .transcript-item .merge-checkbox {
+  opacity: 1;
+  pointer-events: auto;
+}
+.transcript-item.merge-selected {
+  background: rgba(108, 156, 255, 0.10);
+  border-color: rgba(108, 156, 255, 0.4);
+}
+.merge-bar {
+  display: none;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  flex-direction: column;
+  gap: 8px;
+}
+.merge-bar.visible {
+  display: flex;
+}
+.btn-merge {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: linear-gradient(135deg, var(--accent-0), var(--accent-1));
+  color: #fff;
+  font-family: var(--font);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s;
+  box-shadow: 0 2px 10px rgba(108,156,255,0.2);
+}
+.btn-merge:hover { transform: scale(1.03); box-shadow: 0 4px 16px rgba(108,156,255,0.35); }
+.btn-merge:active { transform: scale(0.97); }
+.merge-validation {
+  font-size: 0.72rem;
+  color: #f87171;
+  text-align: center;
+  display: none;
+}
+.merge-validation.visible { display: block; }
+.merge-count {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-align: center;
+}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
 </head>
 <body>
 
@@ -1353,6 +1601,11 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
     <div class="sidebar-title">Transkrypcje</div>
     <div class="transcript-list" id="transcriptList">
       <!-- Załadowane dynamicznie -->
+    </div>
+    <div class="merge-bar" id="mergeBar">
+      <div class="merge-count" id="mergeCount"></div>
+      <button class="btn-merge" id="btnMerge" onclick="handleMergeClick()">Połącz transkrypcje</button>
+      <div class="merge-validation" id="mergeValidation">Zaznacz co najmniej 2 transkrypcje do połączenia</div>
     </div>
     <div class="sidebar-upload" id="sidebarUpload">
       <button class="btn-upload" id="btnUploadShow" onclick="toggleUploadPanel()">
@@ -1381,6 +1634,8 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       </header>
 
       <!-- Audio Player -->
+      <video id="videoEl" preload="auto" controls style="display:none; width:100%; max-height:400px; border-radius: var(--radius-sm); margin-bottom:12px;"></video>
+      <audio id="audioEl" preload="auto"></audio>
       <div class="player-card">
         <div class="player-row">
           <button class="btn-play" id="playBtn" aria-label="Play / Pause">
@@ -1397,7 +1652,17 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
             </div>
           </div>
           <button class="speed-btn" id="speedBtn" title="Prędkość odtwarzania">1×</button>
+          <button class="speed-btn" id="pipBtn" title="Przypnij wideo" style="display:none;font-size:1rem;padding:4px 8px">📌</button>
         </div>
+      </div>
+
+      <!-- Export PDF Button -->
+      <div id="exportPdfWrap" style="display:none;align-items:center;gap:14px;flex-wrap:wrap;margin:10px 0">
+        <button id="exportPdfBtn" style="padding:8px 16px;font-family:var(--font);font-size:0.82rem;font-weight:500;cursor:pointer;border:1px solid rgba(108,156,255,0.3);border-radius:var(--radius-sm);background:rgba(108,156,255,0.08);color:var(--accent-0);transition:all 0.15s" onmouseover="this.style.background='rgba(108,156,255,0.15)';this.style.borderColor='var(--accent-0)'" onmouseout="this.style.background='rgba(108,156,255,0.08)';this.style.borderColor='rgba(108,156,255,0.3)'" onclick="exportPDF()">📄 Eksportuj PDF</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text-dim);cursor:pointer">
+          <input type="checkbox" id="pdfDenseTimestamps" style="accent-color:var(--accent-0);cursor:pointer">
+          Częstsze znaczniki czasu
+        </label>
       </div>
 
       <!-- Speaker Visibility Panel -->
@@ -1406,6 +1671,7 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
           👁 Mówcy <span class="speaker-panel-arrow" id="speakerPanelArrow">▸</span>
         </button>
         <div class="speaker-panel-body" id="speakerPanelBody" style="display:none">
+          <button id="toggleAllSpeakersBtn" style="display:none;width:100%;margin-bottom:8px;padding:6px 12px;font-size:0.82rem;cursor:pointer;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-dim);transition:color 0.15s,background 0.15s" onmouseover="this.style.color='var(--text)';this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.color='var(--text-dim)';this.style.background='var(--bg-card)'" onclick="toggleAllSpeakers()">Odznacz wszystkich</button>
           <div id="speakerCheckboxes"></div>
         </div>
       </div>
@@ -1587,6 +1853,9 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
       <button class="upload-close" onclick="closeUploadPanel()">&times;</button>
     </div>
     <div class="upload-modal-body" id="uploadForm">
+      <div id="uploadYoutubeUrls"></div>
+      <button type="button" onclick="addUrlRow()" style="background:none;border:none;color:var(--accent-0);cursor:pointer;font-size:0.82rem;padding:4px 0;margin-bottom:12px">+Dodaj link</button>
+      <div style="margin-bottom:12px"><span style="color:var(--text-dim);font-size:0.78rem">lub</span></div>
       <div class="upload-dropzone" id="uploadDropzone">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-0);margin-bottom:12px">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
@@ -1626,6 +1895,9 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
         </div>
         <div class="upload-checkbox-row">
           <label><input type="checkbox" id="uploadOllama" checked> Popraw tekst za pomocą Ollama</label>
+        </div>
+        <div class="upload-checkbox-row">
+          <label><input type="checkbox" id="uploadMerge"> Połącz w jedną transkrypcję</label>
         </div>
       </div>
       <div class="config-actions">
@@ -1702,10 +1974,11 @@ header p{font-size:0.8rem;color:var(--text-dim);font-weight:400}
 
 <!-- Lightbox overlay for full preview -->
 <div class="lightbox-overlay" id="lightboxOverlay" style="display:none" onclick="closeLightbox()">
+  <button class="lightbox-nav" id="lightboxPrev" title="Poprzedni (←)" onclick="event.stopPropagation();lightboxStep(-1)">‹</button>
   <img class="lightbox-content" id="lightboxImage" src="" onclick="event.stopPropagation()">
+  <button class="lightbox-nav" id="lightboxNext" title="Następny (→)" onclick="event.stopPropagation();lightboxStep(1)">›</button>
 </div>
 
-<audio id="audio" preload="auto"></audio>
 
 <script>
 // ── Dane wstrzyknięte na start przez serwer Pythona ───────────────────
@@ -1714,8 +1987,210 @@ const INITIAL_AUDIO_URL  = "%%AUDIO_URL%%";
 const INITIAL_NAME       = "%%CURRENT_TRANSCRIPT_NAME%%";
 
 let currentActiveName = INITIAL_NAME;
+
+// ── Auto performance-lite: probe frame rate; if the browser can't keep up
+//    (software rendering / GPU accel off), drop costly blur + pulse effects.
+//    ponytail: rAF-interval heuristic, not a true GPU query — good enough to
+//    catch software compositing. Manual override: localStorage.perfLite = '0'|'1'.
+(function detectPerf(){
+  const manual = localStorage.getItem('perfLite');
+  if(manual === '1'){ document.body.classList.add('perf-lite'); return; }
+  if(manual === '0'){ return; }
+  let frames = 0, slow = 0, last = performance.now();
+  function tick(now){
+    const dt = now - last; last = now;
+    frames++;
+    if(dt > 22) slow++;          // >22ms ≈ under ~45fps while idle
+    if(frames < 30){ requestAnimationFrame(tick); return; }
+    if(slow >= 12) document.body.classList.add('perf-lite');  // ~40%+ slow frames
+  }
+  requestAnimationFrame(tick);
+})();
+
 let allWords = [];          // Płaska lista {el, start, end}
 const speakerEls = new Map(); // speakerId -> [nameEls...]
+
+// ── Multi-select merge state ──────────────────────────────────────────
+const selectedForMerge = new Set();
+
+function toggleMergeSelect(filename) {
+  if (selectedForMerge.has(filename)) {
+    selectedForMerge.delete(filename);
+  } else {
+    selectedForMerge.add(filename);
+  }
+  updateMergeUI();
+}
+
+function updateMergeUI() {
+  const count = selectedForMerge.size;
+  const listContainer = document.getElementById('transcriptList');
+  const mergeBar = document.getElementById('mergeBar');
+  const mergeCount = document.getElementById('mergeCount');
+  const mergeValidation = document.getElementById('mergeValidation');
+
+  // Toggle merge-mode class on sidebar list (makes checkboxes always visible)
+  listContainer.classList.toggle('merge-mode', count > 0);
+
+  // Update item visual state + checkbox checked state
+  listContainer.querySelectorAll('.transcript-item').forEach(el => {
+    const name = el.dataset.name;
+    const cb = el.querySelector('.merge-checkbox');
+    const isSelected = selectedForMerge.has(name);
+    el.classList.toggle('merge-selected', isSelected);
+    if (cb) cb.checked = isSelected;
+  });
+
+  // Show/hide merge bar
+  if (count >= 2 && count <= 20) {
+    mergeBar.classList.add('visible');
+    mergeCount.textContent = `Zaznaczono: ${count}`;
+    mergeValidation.classList.remove('visible');
+  } else if (count > 0) {
+    mergeBar.classList.add('visible');
+    mergeCount.textContent = `Zaznaczono: ${count}`;
+    mergeValidation.classList.remove('visible');
+  } else {
+    mergeBar.classList.remove('visible');
+  }
+}
+
+async function handleMergeClick() {
+  if (selectedForMerge.size < 2) {
+    document.getElementById('mergeValidation').classList.add('visible');
+    return;
+  }
+  const name = prompt('Podaj nazwę wynikowej transkrypcji (max 200 znaków):');
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) { alert('Nazwa nie może być pusta'); return; }
+  if (trimmed.length > 200) { alert('Nazwa nie może przekraczać 200 znaków'); return; }
+  if (/[\/\\:*?"<>|]/.test(trimmed)) { alert('Nazwa zawiera niedozwolone znaki'); return; }
+  try {
+    const res = await fetch('/api/merge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({files: [...selectedForMerge], output_name: trimmed})
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.message || 'Błąd łączenia'); return; }
+    selectedForMerge.clear();
+    updateMergeUI();
+    await loadTranscriptList();
+    await loadTranscript(data.name);
+  } catch (e) {
+    alert('Błąd połączenia z serwerem: ' + e.message);
+  }
+}
+
+// ── Inline rename ─────────────────────────────────────────────────────
+const RENAME_FORBIDDEN = /[\/\\:*?"<>|]/;
+
+function startInlineRename(titleEl, filename) {
+  if (titleEl.querySelector('.rename-input')) return; // already editing
+  const oldTitle = titleEl.textContent;
+  const oldBase = filename.replace(/\.json$/, '');
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'rename-input';
+  input.maxLength = 100;
+  input.value = oldBase;
+  titleEl.textContent = '';
+  titleEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  let committed = false;
+
+  function restore() {
+    titleEl.textContent = oldTitle;
+  }
+
+  async function commit() {
+    if (committed) return;
+    committed = true;
+    const newName = input.value.trim();
+
+    // Client-side validation
+    if (!newName) { alert('Nazwa nie może być pusta'); restore(); return; }
+    if (newName.length > 100) { alert('Nazwa nie może przekraczać 100 znaków'); restore(); return; }
+    if (RENAME_FORBIDDEN.test(newName)) { alert('Nazwa zawiera niedozwolone znaki'); restore(); return; }
+    if (newName === oldBase) { restore(); return; } // no change
+
+    try {
+      const resp = await fetch('/api/rename', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ old_name: oldBase, new_name: newName })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        if (resp.status === 409) {
+          alert('Transkrypcja o tej nazwie już istnieje');
+        } else {
+          alert(data.error || data.message || 'Błąd zmiany nazwy');
+        }
+        restore();
+        return;
+      }
+
+      // Success: update UI
+      const newFilename = data.new_name; // e.g. "new_title.json"
+      const newTitle = newFilename.replace(/\.json$/, '');
+
+      // Update sidebar title text
+      titleEl.textContent = newTitle;
+
+      // Update the item's dataset
+      const itemEl = titleEl.closest('.transcript-item');
+      if (itemEl) itemEl.dataset.name = newFilename;
+
+      // Update currentActiveName, header, document title if this was the active transcript
+      if (filename === currentActiveName) {
+        currentActiveName = newFilename;
+        setUrlTranscript(newFilename);
+        document.getElementById('headerTitle').textContent = newTitle;
+        document.title = `Transkrypcja — ${newTitle}`;
+      }
+
+      // Migrate localStorage speaker names key
+      const oldKey = 'speaker_names_' + oldBase;
+      const stored = localStorage.getItem(oldKey);
+      if (stored !== null) {
+        const newKey = 'speaker_names_' + newName;
+        localStorage.setItem(newKey, stored);
+        localStorage.removeItem(oldKey);
+      }
+
+      // Migrate hidden speakers key
+      const oldHiddenKey = 'hidden_speakers_' + oldBase;
+      const storedHidden = localStorage.getItem(oldHiddenKey);
+      if (storedHidden !== null) {
+        const newHiddenKey = 'hidden_speakers_' + newName;
+        localStorage.setItem(newHiddenKey, storedHidden);
+        localStorage.removeItem(oldHiddenKey);
+      }
+
+      // Reload speaker names if active transcript was renamed
+      if (newFilename === currentActiveName) {
+        speakerNames = loadNames();
+      }
+
+    } catch (err) {
+      console.error('Rename error:', err);
+      alert('Błąd zmiany nazwy: ' + err.message);
+      restore();
+    }
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { committed = true; restore(); }
+  });
+  input.addEventListener('blur', () => { if (!committed) commit(); });
+  input.addEventListener('click', (e) => e.stopPropagation());
+}
 
 // ── Paleta akcentów ──────────────────────────────────────────────────
 const ACCENTS = [
@@ -1882,7 +2357,8 @@ let currentTranscriptData = INITIAL_TRANSCRIPT;
 // ── Formatowanie czasu ────────────────────────────────────────────────
 function fmt(s){
   if(s==null||isNaN(s)) return '0:00';
-  const m=Math.floor(s/60), sec=Math.floor(s%60);
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=Math.floor(s%60);
+  if(h>0) return h+':'+(m<10?'0':'')+m+':'+(sec<10?'0':'')+sec;
   return m+':'+(sec<10?'0':'')+sec;
 }
 
@@ -1962,6 +2438,7 @@ function renderTranscript(transcriptData) {
     name.addEventListener('blur', () => {
       const v = name.textContent.trim() || spk;
       saveName(spk, v);
+      speakerNames[spk] = v;
       for(const el of speakerEls.get(spk)) el.textContent = v;
       populateSpeakerSelect();
       buildSpeakerCheckboxes();
@@ -2066,6 +2543,199 @@ function toggleSpeakerPanel(){
   arrow.classList.toggle('open', !isOpen);
 }
 
+function getToggleLabel(hiddenSpeakers, allSpeakers){
+  return hiddenSpeakers.length === 0 ? 'Odznacz wszystkich' : 'Zaznacz wszystkich';
+}
+
+function toggleAllSpeakers(){
+  const segments = (currentTranscriptData && currentTranscriptData.segments) || [];
+  const allSpeakers = [...new Set(segments.map(s => s.speaker || 'UNKNOWN'))];
+  if(allSpeakers.length === 0) return;
+  const hidden = loadHiddenSpeakers();
+  const newHidden = hidden.length === 0 ? [...allSpeakers] : [];
+  saveHiddenSpeakers(newHidden);
+  // Update checkboxes
+  allSpeakers.forEach(spk => {
+    const cb = document.getElementById('spk_cb_' + spk);
+    if(cb) cb.checked = !newHidden.includes(spk);
+    document.querySelectorAll(`.speaker-section[data-speaker="${spk}"]`).forEach(sec => {
+      if(newHidden.includes(spk)) sec.classList.add('hidden-speaker');
+      else sec.classList.remove('hidden-speaker');
+    });
+  });
+  // Update button label
+  const btn = document.getElementById('toggleAllSpeakersBtn');
+  if(btn) btn.textContent = getToggleLabel(newHidden, allSpeakers);
+}
+
+function collectVisibleSpeakerText() {
+  const result = [];
+  const map = new Map(); // speakerId → index in result
+  document.querySelectorAll('.speaker-section:not(.hidden-speaker)').forEach(sec => {
+    const spk = sec.dataset.speaker;
+    const name = speakerNames[spk] || spk;
+    const text = sec.querySelector('.words')?.textContent.trim();
+    if (!text) return;
+    const timeStr = sec.querySelector('.speaker-time')?.textContent.trim() || '';
+    if (!map.has(spk)) {
+      map.set(spk, result.length);
+      result.push({speaker: name, segments: []});
+    }
+    result[map.get(spk)].segments.push({text, time: timeStr});
+  });
+  return result;
+}
+
+// Dense variant: one timestamped entry PER transcript segment (not per speaker
+// block), so the PDF shows the minute more frequently. Groups consecutive
+// same-speaker segments under one header, mirroring the on-screen layout, and
+// skips hidden speakers.
+function collectDenseSpeakerText() {
+  const segments = (currentTranscriptData && currentTranscriptData.segments) || [];
+  const hidden = loadHiddenSpeakers();
+  const result = [];
+  let cur = null;
+  for (const seg of segments) {
+    const spk = seg.speaker || 'UNKNOWN';
+    if (hidden.includes(spk)) { cur = null; continue; }
+    const text = (seg.text || (seg.words || []).map(w => w.word).join(' ')).trim();
+    if (!text) continue;
+    const name = speakerNames[spk] || spk;
+    // Start a new block when the speaker changes
+    if (!cur || cur._spk !== spk) {
+      cur = { speaker: name, _spk: spk, segments: [] };
+      result.push(cur);
+    }
+    cur.segments.push({ text, time: fmt(seg.start) });
+  }
+  return result;
+}
+
+// ponytail: font cached after first fetch from CDN
+let _cachedFontBase64 = null;
+
+async function _loadPolishFont() {
+  if (_cachedFontBase64) return _cachedFontBase64;
+  // Roboto Regular — supports full Latin Extended (Polish ąćęłńóśźż)
+  const url = 'https://cdn.jsdelivr.net/fontsource/fonts/roboto@latest/latin-ext-400-normal.ttf';
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('Font fetch failed: ' + resp.status);
+  const buf = await resp.arrayBuffer();
+  // Convert ArrayBuffer to base64
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  _cachedFontBase64 = btoa(binary);
+  return _cachedFontBase64;
+}
+
+async function generatePDF(speakerData, transcriptName) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  // Register font supporting Polish diacritical characters
+  try {
+    const fontBase64 = await _loadPolishFont();
+    doc.addFileToVFS('Roboto-Regular.ttf', fontBase64);
+    doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+    doc.setFont('Roboto');
+  } catch (e) {
+    console.warn('Could not load Polish font, falling back to Helvetica:', e);
+    doc.setFont('Helvetica');
+  }
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 20;
+  const maxTextWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  function checkPageBreak(needed) {
+    if (y + needed > pageHeight - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  }
+
+  speakerData.forEach((entry, idx) => {
+    // Speaker header (bold via font style)
+    const headerSize = 14;
+    const bodySize = 10;
+    const lineHeight = 1.4;
+
+    checkPageBreak(headerSize * lineHeight + 10);
+
+    if (idx > 0) { y += 8; checkPageBreak(headerSize * lineHeight + 10); }
+
+    doc.setFontSize(headerSize);
+    // ponytail: jsPDF bold requires a separate font style; use size + underline as visual distinction
+    doc.setFont(doc.getFont().fontName, 'normal');
+    doc.setFontSize(headerSize);
+    doc.text(entry.speaker, margin, y);
+    // Underline the speaker name
+    const nameWidth = doc.getTextWidth(entry.speaker);
+    doc.setDrawColor(108, 156, 255);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y + 1, margin + nameWidth, y + 1);
+    y += headerSize * lineHeight / 2 + 6;
+
+    // Segments
+    doc.setFontSize(bodySize);
+    entry.segments.forEach(seg => {
+      const text = typeof seg === 'string' ? seg : seg.text;
+      const time = typeof seg === 'string' ? '' : seg.time;
+      // Time label
+      if (time) {
+        checkPageBreak(bodySize * lineHeight / 2.83 + 4);
+        doc.setFontSize(8);
+        doc.setTextColor(120, 120, 120);
+        doc.text('[' + time + ']', margin, y);
+        y += 4;
+        doc.setFontSize(bodySize);
+        doc.setTextColor(0, 0, 0);
+      }
+      const lines = doc.splitTextToSize(text, maxTextWidth);
+      const blockHeight = lines.length * bodySize * lineHeight / 2.83; // pt to mm approx
+      checkPageBreak(blockHeight + 4);
+      doc.text(lines, margin, y);
+      y += blockHeight + 3;
+    });
+  });
+
+  // Trigger download
+  const today = new Date().toISOString().slice(0, 10);
+  const safeName = transcriptName.replace(/\.json$/, '');
+  doc.save(safeName + '_' + today + '.pdf');
+}
+
+async function copyToClipboard(speakerData) {
+  const text = speakerData.map(entry =>
+    entry.speaker + '\n' + entry.segments.map(seg => {
+      const t = typeof seg === 'string' ? '' : seg.time;
+      const txt = typeof seg === 'string' ? seg : seg.text;
+      return t ? `[${t}] ${txt}` : txt;
+    }).join('\n')
+  ).join('\n\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function exportPDF() {
+  const dense = document.getElementById('pdfDenseTimestamps')?.checked;
+  const speakerData = dense ? collectDenseSpeakerText() : collectVisibleSpeakerText();
+  if (speakerData.length === 0) {
+    showToast('Brak treści do eksportu', true);
+    return;
+  }
+  const copied = await copyToClipboard(speakerData);
+  showToast(copied ? 'Tekst skopiowany do schowka' : 'Nie udało się skopiować do schowka', !copied);
+  await generatePDF(speakerData, currentActiveName);
+}
+
 function buildSpeakerCheckboxes(){
   const container = document.getElementById('speakerCheckboxes');
   container.innerHTML = '';
@@ -2103,6 +2773,9 @@ function buildSpeakerCheckboxes(){
         if(cb.checked) sec.classList.remove('hidden-speaker');
         else sec.classList.add('hidden-speaker');
       });
+      // Update toggle-all button label
+      const toggleBtn = document.getElementById('toggleAllSpeakersBtn');
+      if(toggleBtn) toggleBtn.textContent = getToggleLabel(newHidden, seenSpeakers.map(s => s.id));
     });
 
     const dot = document.createElement('span');
@@ -2125,11 +2798,23 @@ function buildSpeakerCheckboxes(){
     item.append(cb, dot, label, cameraBtn);
     container.appendChild(item);
   });
+
+  // Toggle-all button: show only when speakers exist, set label
+  const toggleBtn = document.getElementById('toggleAllSpeakersBtn');
+  if(toggleBtn){
+    if(seenSpeakers.length === 0){
+      toggleBtn.style.display = 'none';
+    } else {
+      toggleBtn.style.display = 'block';
+      toggleBtn.textContent = getToggleLabel(hiddenSpeakers, seenSpeakers.map(s => s.id));
+    }
+  }
 }
 
 function showEmptyState() {
   currentActiveName = "";
   document.getElementById('headerTitle').textContent = "Brak transkrypcji";
+  document.getElementById('exportPdfWrap').style.display = 'none';
   document.title = "Transkrypcja — Brak";
 
   // Clear file param from URL
@@ -2154,15 +2839,46 @@ function showEmptyState() {
     </div>
   `;
 
-  audio.src = "";
-  audio.load();
+  mediaEl.src = "";
+  mediaEl.load();
   timeDur.textContent = "0:00";
   progressIn.style.width = "0%";
   timeCur.textContent = "0:00";
 }
 
 // ── Obsługa Audio ────────────────────────────────────────────────────
-const audio      = document.getElementById('audio');
+const audioEl    = document.getElementById('audioEl');
+const videoEl    = document.getElementById('videoEl');
+let mediaEl      = audioEl; // active media element (switches between audio/video)
+
+function getMediaElementType(filename) {
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  const videoExts = ['mp4', 'mkv', 'mov', 'avi', 'webm'];
+  return videoExts.includes(ext) ? 'video' : 'audio';
+}
+
+// ── Media event listeners (re-bound on element switch) ───────────────
+let _boundMediaListeners = [];
+
+function switchMediaElement(filename) {
+  const type = getMediaElementType(filename);
+  const newEl = type === 'video' ? videoEl : audioEl;
+  const oldEl = type === 'video' ? audioEl : videoEl;
+
+  // Transfer playback state
+  oldEl.pause();
+  oldEl.src = '';
+  oldEl.style.display = 'none';
+
+  newEl.style.display = type === 'video' ? 'block' : '';
+  mediaEl = newEl;
+  bindMediaListeners();
+
+  // Show/hide PiP button based on media type
+  document.getElementById('pipBtn').style.display = type === 'video' ? '' : 'none';
+  if(type !== 'video') closePip();
+}
+
 const playBtn    = document.getElementById('playBtn');
 const iconPlay   = document.getElementById('iconPlay');
 const iconPause  = document.getElementById('iconPause');
@@ -2172,42 +2888,146 @@ const timeCur    = document.getElementById('timeCur');
 const timeDur    = document.getElementById('timeDur');
 const speedBtn   = document.getElementById('speedBtn');
 
-audio.src = INITIAL_AUDIO_URL;
+// Switch to the correct element for the initial media file
+if (INITIAL_AUDIO_URL && INITIAL_AUDIO_URL !== '/audio/') {
+  const initialFilename = decodeURIComponent(INITIAL_AUDIO_URL.split('/').pop());
+  switchMediaElement(initialFilename);
+  mediaEl.src = INITIAL_AUDIO_URL;
+} else {
+  mediaEl.src = INITIAL_AUDIO_URL;
+}
 
 function togglePlay(){
-  if(!audio.src || audio.src.endsWith('/audio/')) return;
-  if(audio.paused) audio.play(); else audio.pause();
+  if(!mediaEl.src || mediaEl.src.endsWith('/audio/')) return;
+  if(mediaEl.paused) mediaEl.play(); else mediaEl.pause();
 }
 function seekTo(t){
-  if(!audio.src || audio.src.endsWith('/audio/')) return;
-  audio.currentTime = t;
-  if(audio.paused) audio.play();
+  if(!mediaEl.src || mediaEl.src.endsWith('/audio/')) return;
+  autoScrollEnabled = true;
+  mediaEl.currentTime = t;
+  if(mediaEl.paused) mediaEl.play();
 }
 
 playBtn.addEventListener('click', togglePlay);
 
-audio.addEventListener('play',  () => { iconPlay.style.display='none';  iconPause.style.display=''; });
-audio.addEventListener('pause', () => { iconPlay.style.display='';      iconPause.style.display='none'; });
-audio.addEventListener('loadedmetadata', () => { timeDur.textContent = fmt(audio.duration); });
+function bindMediaListeners() {
+  // Remove old listeners
+  _boundMediaListeners.forEach(([el, evt, fn]) => el.removeEventListener(evt, fn));
+  _boundMediaListeners = [];
+
+  function addML(evt, fn) {
+    mediaEl.addEventListener(evt, fn);
+    _boundMediaListeners.push([mediaEl, evt, fn]);
+  }
+
+  addML('play',  () => { iconPlay.style.display='none';  iconPause.style.display=''; });
+  addML('pause', () => { iconPlay.style.display='';      iconPause.style.display='none'; });
+  addML('loadedmetadata', () => { timeDur.textContent = fmt(mediaEl.duration); });
+  addML('play', () => { if(hlTimer) clearTimeout(hlTimer); highlightLoop(); });
+  addML('pause', () => { if(hlTimer){ clearTimeout(hlTimer); hlTimer = null; } });
+  addML('seeked', () => { highlightLoop(); });
+}
+
+// Initial bind
+bindMediaListeners();
 
 progressOut.addEventListener('click', e => {
-  if(!audio.src || audio.src.endsWith('/audio/')) return;
+  if(!mediaEl.src || mediaEl.src.endsWith('/audio/')) return;
   const rect = progressOut.getBoundingClientRect();
   const pct  = (e.clientX - rect.left) / rect.width;
-  audio.currentTime = pct * audio.duration;
+  mediaEl.currentTime = pct * mediaEl.duration;
 });
 
 const speeds = [1, 1.25, 1.5, 1.75, 2, 0.5, 0.75];
 let speedIdx = 0;
 speedBtn.addEventListener('click', () => {
   speedIdx = (speedIdx + 1) % speeds.length;
-  audio.playbackRate = speeds[speedIdx];
+  mediaEl.playbackRate = speeds[speedIdx];
   speedBtn.textContent = speeds[speedIdx] + '×';
 });
+
+// ── Picture-in-Picture mini player ──────────────────────────────────
+const pipBtn = document.getElementById('pipBtn');
+var pipContainer = null;
+var pipActive = false;
+var pipSize = 320; // ponytail: single size for now, resize cycles 240/320/420
+
+function openPip(){
+  if(pipActive || mediaEl !== videoEl) return;
+  // Create floating container
+  pipContainer = document.createElement('div');
+  pipContainer.className = 'video-pip';
+  pipContainer.style.width = pipSize + 'px';
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'pip-close';
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = closePip;
+  pipContainer.appendChild(closeBtn);
+  // Resize button
+  const resizeBtn = document.createElement('button');
+  resizeBtn.className = 'pip-resize';
+  resizeBtn.textContent = '↔';
+  resizeBtn.onclick = () => {
+    const sizes = [240, 320, 420];
+    const idx = sizes.indexOf(pipSize);
+    pipSize = sizes[(idx + 1) % sizes.length];
+    pipContainer.style.width = pipSize + 'px';
+  };
+  pipContainer.appendChild(resizeBtn);
+  // Move video element into pip
+  videoEl.style.display = 'block';
+  videoEl.style.maxHeight = 'none';
+  videoEl.style.marginBottom = '0';
+  videoEl.controls = false;
+  pipContainer.appendChild(videoEl);
+  document.body.appendChild(pipContainer);
+  pipActive = true;
+  pipBtn.textContent = '📌';
+  pipBtn.title = 'Odpnij wideo';
+  // Dragging
+  let dragging = false, dx = 0, dy = 0;
+  pipContainer.addEventListener('mousedown', e => {
+    if(e.target === closeBtn || e.target === resizeBtn || e.target === videoEl) return;
+    dragging = true;
+    dx = e.clientX - pipContainer.getBoundingClientRect().left;
+    dy = e.clientY - pipContainer.getBoundingClientRect().top;
+    pipContainer.style.cursor = 'grabbing';
+  });
+  document.addEventListener('mousemove', e => {
+    if(!dragging) return;
+    pipContainer.style.left = (e.clientX - dx) + 'px';
+    pipContainer.style.top = (e.clientY - dy) + 'px';
+    pipContainer.style.right = 'auto';
+    pipContainer.style.bottom = 'auto';
+  });
+  document.addEventListener('mouseup', () => { dragging = false; if(pipContainer) pipContainer.style.cursor = 'grab'; });
+}
+
+function closePip(){
+  if(!pipActive || !pipContainer) return;
+  // Move video back to original location
+  const playerCard = document.querySelector('.player-card');
+  playerCard.parentNode.insertBefore(videoEl, playerCard);
+  videoEl.style.maxHeight = '400px';
+  videoEl.style.marginBottom = '12px';
+  videoEl.controls = true;
+  pipContainer.remove();
+  pipContainer = null;
+  pipActive = false;
+  pipBtn.textContent = '📌';
+  pipBtn.title = 'Przypnij wideo';
+}
+
+pipBtn.addEventListener('click', () => {
+  if(pipActive) closePip(); else openPip();
+});
+
 
 // ── Animacja karaoke (zoptymalizowana: binarySearch + 10fps + smart scroll) ──
 let prevActive = null;
 let hlTimer = null;
+let autoScrollEnabled = true;
 
 function binarySearchWord(t){
   let lo = 0, hi = allWords.length - 1;
@@ -2227,9 +3047,9 @@ function isInViewport(el){
 }
 
 function highlightLoop(){
-  const t = audio.currentTime;
-  if(audio.duration){
-    progressIn.style.width = ((t / audio.duration) * 100) + '%';
+  const t = mediaEl.currentTime;
+  if(mediaEl.duration){
+    progressIn.style.width = ((t / mediaEl.duration) * 100) + '%';
   }
   timeCur.textContent = fmt(t);
 
@@ -2239,22 +3059,19 @@ function highlightLoop(){
     if(prevActive) prevActive.el.classList.remove('active');
     if(found){
       found.el.classList.add('active');
-      if(!isInViewport(found.el)){
+      if(autoScrollEnabled && !isInViewport(found.el)){
+        _scrolledByCode = true;
         found.el.scrollIntoView({behavior:'smooth', block:'nearest'});
       }
     }
     prevActive = found;
   }
 
-  if(!audio.paused){
+  if(!mediaEl.paused){
     hlTimer = setTimeout(highlightLoop, 100); // ~10fps
   }
 }
 
-// Uruchamiaj pętlę przy play, zatrzymuj przy pause
-audio.addEventListener('play', () => { if(hlTimer) clearTimeout(hlTimer); highlightLoop(); });
-audio.addEventListener('pause', () => { if(hlTimer){ clearTimeout(hlTimer); hlTimer = null; } });
-audio.addEventListener('seeked', () => { highlightLoop(); });
 // Uruchom raz na start żeby ustawić stan
 highlightLoop();
 
@@ -2264,13 +3081,28 @@ document.addEventListener('keydown', e => {
   if(e.target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   switch(e.code){
     case 'Space':
-      e.preventDefault(); togglePlay(); break;
+      e.preventDefault(); autoScrollEnabled = false; togglePlay(); break;
     case 'ArrowLeft':
-      e.preventDefault(); if(audio.src) audio.currentTime = Math.max(0, audio.currentTime - 5); break;
+      e.preventDefault(); if(mediaEl.src) mediaEl.currentTime = Math.max(0, mediaEl.currentTime - 5); break;
     case 'ArrowRight':
-      e.preventDefault(); if(audio.src) audio.currentTime = Math.min(audio.duration||0, audio.currentTime + 5); break;
+      e.preventDefault(); if(mediaEl.src) mediaEl.currentTime = Math.min(mediaEl.duration||0, mediaEl.currentTime + 5); break;
   }
 });
+
+// ── Viewport detection: disable auto-scroll on user scroll ────────────
+let _scrollDebounce = null;
+let _scrolledByCode = false; // ponytail: flag to distinguish programmatic scrolls
+window.addEventListener('scroll', () => {
+  if(_scrolledByCode){ _scrolledByCode = false; return; }
+  // User scrolled manually → disable auto-scroll
+  autoScrollEnabled = false;
+  clearTimeout(_scrollDebounce);
+  _scrollDebounce = setTimeout(() => {
+    // Re-enable only if active word drifted back into view naturally
+    const el = document.querySelector('.w.active');
+    if(el && isInViewport(el)) autoScrollEnabled = true;
+  }, 2000);
+}, true);
 
 // ── URL Navigation Manager ────────────────────────────────────────────
 function setUrlTranscript(filename) {
@@ -2316,6 +3148,7 @@ async function initFromUrl(transcriptList) {
 
 // ── Dynamiczne Ładowanie Listy i Transkrypcji ─────────────────────────
 async function loadTranscript(filename, audioFilename, title) {
+  autoScrollEnabled = true;
   try {
     const response = await fetch(`/api/get?name=${encodeURIComponent(filename)}`);
     if (!response.ok) throw new Error("Nie udało się załadować pliku transkrypcji");
@@ -2332,16 +3165,18 @@ async function loadTranscript(filename, audioFilename, title) {
     currentActiveName = filename;
     setUrlTranscript(filename);
     renderTranscript(data);
+    document.getElementById('exportPdfWrap').style.display = 'flex';
 
     document.getElementById('headerTitle').textContent = title;
     document.title = `Transkrypcja — ${title}`;
 
     if (audioFilename) {
-      audio.src = `/audio/${encodeURIComponent(audioFilename)}`;
+      switchMediaElement(audioFilename);
+      mediaEl.src = `/audio/${encodeURIComponent(audioFilename)}`;
     } else {
-      audio.src = "";
+      mediaEl.src = "";
     }
-    audio.load();
+    mediaEl.load();
     timeDur.textContent = "0:00";
     progressIn.style.width = "0%";
     timeCur.textContent = "0:00";
@@ -2413,7 +3248,20 @@ async function loadTranscriptList() {
       if (item.name === currentActiveName) {
         el.classList.add('active');
       }
+      if (selectedForMerge.has(item.name)) {
+        el.classList.add('merge-selected');
+      }
       el.dataset.name = item.name;
+
+      // Checkbox for multi-select merge
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'merge-checkbox';
+      cb.checked = selectedForMerge.has(item.name);
+      cb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMergeSelect(item.name);
+      });
 
       const contentEl = document.createElement('div');
       contentEl.className = 'transcript-item-content';
@@ -2421,6 +3269,10 @@ async function loadTranscriptList() {
       const titleEl = document.createElement('div');
       titleEl.className = 'transcript-item-title';
       titleEl.textContent = item.title;
+      titleEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        startInlineRename(titleEl, item.name);
+      });
 
       const metaEl = document.createElement('div');
       metaEl.className = 'transcript-item-meta';
@@ -2458,7 +3310,7 @@ async function loadTranscriptList() {
       `;
       delBtn.addEventListener('click', (e) => deleteTranscript(item.name, item.title, e));
 
-      el.append(contentEl, delBtn);
+      el.append(cb, contentEl, delBtn);
 
       el.addEventListener('click', () => {
         loadTranscript(item.name, item.audio, item.title);
@@ -2469,6 +3321,9 @@ async function loadTranscriptList() {
 
       listContainer.appendChild(el);
     });
+
+    // Restore merge-mode class and merge bar state after list rebuild
+    updateMergeUI();
   } catch (err) {
     console.error("Błąd podczas ładowania listy transkrypcji:", err);
   }
@@ -3142,10 +3997,43 @@ function resetUploadPanel(){
   document.getElementById('uploadDone').style.display = 'none';
   document.getElementById('uploadError').style.display = 'none';
   document.getElementById('uploadFileList').innerHTML = '';
+  ytUrls = [''];
+  renderUrlRows();
   document.getElementById('btnStartTranscribe').disabled = true;
   document.getElementById('uploadProgressSteps').innerHTML = '';
+  document.getElementById('uploadMerge').checked = false;
   uploadFiles = [];
   newTranscriptFile = null;
+}
+
+// Multi-URL state and rendering
+let ytUrls = [''];
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function addUrlRow() {
+  ytUrls.push('');
+  renderUrlRows();
+}
+
+function renderUrlRows() {
+  const container = document.getElementById('uploadYoutubeUrls');
+  container.innerHTML = '';
+  ytUrls.forEach((val, i) => {
+    const row = document.createElement('div');
+    row.className = 'yt-url-row';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px';
+    row.innerHTML = `<input type="text" value="${escapeHtml(val)}" placeholder="https://youtube.com/watch?v=... lub inny URL wideo" oninput="ytUrls[${i}]=this.value;updateStartBtn()" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.85rem">`;
+    container.appendChild(row);
+  });
+}
+
+function updateStartBtn() {
+  const hasUrl = ytUrls.some(u => u.trim().length > 0);
+  const hasFiles = uploadFiles && uploadFiles.length > 0;
+  document.getElementById('btnStartTranscribe').disabled = !hasUrl && !hasFiles;
 }
 
 // Dropzone — multi-file
@@ -3164,6 +4052,7 @@ dropzone.addEventListener('drop', e => {
 fileInput.addEventListener('change', () => {
   if(fileInput.files.length > 0) selectFiles(fileInput.files);
 });
+renderUrlRows();
 
 function selectFiles(files){
   uploadFiles = Array.from(files);
@@ -3175,12 +4064,15 @@ function selectFiles(files){
     div.textContent = '📁 ' + f.name + ' (' + (f.size / (1024*1024)).toFixed(1) + ' MB)';
     listEl.appendChild(div);
   });
-  document.getElementById('btnStartTranscribe').disabled = uploadFiles.length === 0;
+  updateStartBtn();
 }
 
 async function startUploadTranscription(){
-  if(!uploadFiles || uploadFiles.length === 0) return;
+  const nonEmptyUrls = ytUrls.filter(u => u.trim().length > 0);
+  const hasFiles = uploadFiles && uploadFiles.length > 0;
+  if(!nonEmptyUrls.length && !hasFiles) return;
 
+  const merge = document.getElementById('uploadMerge').checked;
   const model = document.getElementById('uploadModel').value;
   const device = document.getElementById('uploadDevice').value;
   const minSp = document.getElementById('uploadMinSpeakers').value;
@@ -3189,14 +4081,88 @@ async function startUploadTranscription(){
 
   document.getElementById('uploadForm').style.display = 'none';
   document.getElementById('uploadProgress').style.display = 'block';
-  document.getElementById('uploadProgressMsg').textContent = 'Przesyłanie plików...';
   document.getElementById('uploadProgressBar').style.width = '0%';
   document.getElementById('uploadProgressPct').textContent = '0%';
 
+  if(merge){
+    // ── Merge mode: single POST to /api/transcribe-merge ──
+    document.getElementById('uploadProgressMsg').textContent = 'Wysyłanie do scalenia...';
+    document.getElementById('uploadProgressBar').style.width = '50%';
+    document.getElementById('uploadProgressPct').textContent = '50%';
+
+    const params = {
+      youtube_urls: nonEmptyUrls,
+      model, device,
+      compute_type: 'float16',
+      batch_size: 4,
+      min_speakers: minSp || null,
+      max_speakers: maxSp || null,
+      use_ollama: useOllama === 'true',
+      language: 'pl'
+    };
+
+    const formData = new FormData();
+    formData.append('params', JSON.stringify(params));
+    for(let i = 0; i < (uploadFiles || []).length; i++){
+      formData.append('file_' + i, uploadFiles[i]);
+    }
+
+    try {
+      const resp = await fetch('/api/transcribe-merge', { method: 'POST', body: formData });
+      if(resp.ok){
+        const data = await resp.json();
+        console.log('Merge job started:', data.job_id);
+        closeUploadPanel();
+        resetUploadPanel();
+        openQueuePanel();
+        showToast('✅ Zadanie scalania dodano do kolejki');
+      } else {
+        const err = await resp.json().catch(() => ({}));
+        showUploadError(err.error || 'Błąd scalania transkrypcji');
+      }
+    } catch(e) {
+      showUploadError('Błąd połączenia z serwerem');
+    }
+    return;
+  }
+
+  // ── Non-merge mode: one job per source (existing behavior) ──
   let successCount = 0;
-  for(let i = 0; i < uploadFiles.length; i++){
+
+  // YouTube URL transcription — iterate all non-empty URLs
+  for(let i = 0; i < nonEmptyUrls.length; i++){
+    const url = nonEmptyUrls[i];
+    document.getElementById('uploadProgressMsg').textContent = `Pobieranie z YouTube (${i+1}/${nonEmptyUrls.length})...`;
+    const pct = Math.round(((i+1) / (nonEmptyUrls.length + (uploadFiles||[]).length)) * 100);
+    document.getElementById('uploadProgressBar').style.width = pct + '%';
+    document.getElementById('uploadProgressPct').textContent = pct + '%';
+    try {
+      const resp = await fetch('/api/transcribe-youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          youtube_url: url, model, device, compute_type: 'float16',
+          batch_size: 4, use_ollama: useOllama === 'true',
+          min_speakers: minSp || null, max_speakers: maxSp || null
+        })
+      });
+      if(resp.ok) successCount++;
+      else {
+        const err = await resp.json().catch(() => ({}));
+        showUploadError(err.error || 'Błąd pobierania z YouTube');
+        return;
+      }
+    } catch(e) {
+      showUploadError('Błąd połączenia z serwerem');
+      return;
+    }
+  }
+
+  // File upload transcription
+  for(let i = 0; i < (uploadFiles || []).length; i++){
     const file = uploadFiles[i];
-    const pct = Math.round(((i+1) / uploadFiles.length) * 100);
+    const total = nonEmptyUrls.length + uploadFiles.length;
+    const pct = Math.round(((nonEmptyUrls.length + i + 1) / total) * 100);
     document.getElementById('uploadProgressMsg').textContent = `Przesyłanie ${i+1}/${uploadFiles.length}: ${file.name}`;
     document.getElementById('uploadProgressBar').style.width = pct + '%';
     document.getElementById('uploadProgressPct').textContent = pct + '%';
@@ -3216,12 +4182,12 @@ async function startUploadTranscription(){
     } catch(e) { /* continue */ }
   }
 
-  // Done uploading — close and open queue
+  // Done — close and open queue
   closeUploadPanel();
   resetUploadPanel();
   openQueuePanel();
   if(successCount > 0){
-    showToast(`✅ ${successCount} plik(ów) dodano do kolejki transkrypcji`);
+    showToast(`✅ ${successCount} zadanie(ń) dodano do kolejki transkrypcji`);
   }
 }
 
@@ -3279,7 +4245,8 @@ async function refreshQueue(){
     if(!resp.ok) return;
     const jobs = await resp.json();
     updateQueueBadge(jobs);
-    if(_queuePanelOpen) renderQueueJobs(jobs);
+    // Don't re-render if user has logs open (would destroy the log box)
+    if(_queuePanelOpen && !document.querySelector('.job-log-box')) renderQueueJobs(jobs);
     notifyNewDone(jobs);
   } catch(e){ /* ignore */ }
 }
@@ -3308,6 +4275,7 @@ function notifyNewDone(jobs){
 
 const STATUS_ICON = { queued:'⏳', running:'🔄', done:'✅', error:'❌', cancelled:'🚫' };
 const STATUS_LABEL = { queued:'W kolejce', running:'W toku', done:'Gotowe', error:'Błąd', cancelled:'Anulowano' };
+const _jobLogs = {}; // job_id → log text
 
 function renderQueueJobs(jobs){
   const body = document.getElementById('queueBody');
@@ -3332,8 +4300,11 @@ function renderQueueJobs(jobs){
     } else if(job.status === 'done' && job.result){
       actionsHTML = `<button class="job-action-btn primary" onclick="openJobResult('${job.result}')">Otwórz wynik</button>`;
     } else if(job.status === 'error'){
-      const logText = job.log ? job.log.join('\\n') : '';
-      if(logText) actionsHTML = `<button class="job-action-btn" onclick="showJobLog(this, ${JSON.stringify(logText)})">📋 Pokaż logi</button>`;
+      const logText = job.log ? job.log.join('\n') : '';
+      if(logText){
+        _jobLogs[job.id] = logText;
+        actionsHTML = `<button class="job-action-btn" onclick="showJobLog(this, '${job.id}')">📋 Pokaż logi</button>`;
+      }
     }
 
     card.innerHTML = `
@@ -3374,14 +4345,15 @@ async function openJobResult(jsonFile){
   await loadTranscript(jsonFile, audioFile, title);
 }
 
-function showJobLog(btn, logText){
-  const existing = btn.nextElementSibling;
-  if(existing && existing.classList.contains('job-log-box')){
+function showJobLog(btn, jobId){
+  const existing = btn.parentElement.querySelector('.job-log-box');
+  if(existing){
     existing.remove(); return;
   }
+  const logText = _jobLogs[jobId] || 'Brak logów';
   const pre = document.createElement('pre');
   pre.className = 'job-log-box';
-  pre.style.cssText = 'font-size:0.7rem;color:var(--text-dim);background:rgba(0,0,0,0.3);border-radius:6px;padding:8px;margin-top:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto';
+  pre.style.cssText = 'font-size:0.7rem;color:var(--text-dim);background:rgba(0,0,0,0.3);border-radius:6px;padding:8px;margin-top:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto';
   pre.textContent = logText;
   btn.parentElement.appendChild(pre);
 }
@@ -3825,6 +4797,7 @@ async function fetchScreenshots(excludeTimes) {
     }
 
     if (data.screenshots && data.screenshots.length > 0) {
+      _lightboxSrcs = data.screenshots.map(s => s.base64);
       data.screenshots.forEach((shot, index) => {
         const card = document.createElement('div');
         card.className = 'screenshot-card';
@@ -3833,7 +4806,7 @@ async function fetchScreenshots(excludeTimes) {
         img.src = shot.base64;
         img.style.cursor = 'zoom-in';
         img.title = 'Kliknij, aby powiększyć';
-        img.onclick = () => showLightbox(shot.base64);
+        img.onclick = () => showLightbox(index);
 
         const info = document.createElement('div');
         info.style.cssText = 'font-size:0.75rem; color:var(--text-dim); text-align:center;';
@@ -3875,11 +4848,24 @@ async function fetchScreenshots(excludeTimes) {
   }
 }
 
-function showLightbox(src) {
+let _lightboxSrcs = [];
+let _lightboxIdx = 0;
+
+function showLightbox(index) {
+  if(!_lightboxSrcs.length) return;
+  _lightboxIdx = (index + _lightboxSrcs.length) % _lightboxSrcs.length;
   const overlay = document.getElementById('lightboxOverlay');
   const img = document.getElementById('lightboxImage');
-  img.src = src;
+  img.src = _lightboxSrcs[_lightboxIdx];
   overlay.style.display = 'flex';
+  // Show nav arrows only when there's more than one image
+  const multi = _lightboxSrcs.length > 1;
+  document.getElementById('lightboxPrev').style.display = multi ? 'flex' : 'none';
+  document.getElementById('lightboxNext').style.display = multi ? 'flex' : 'none';
+}
+
+function lightboxStep(delta) {
+  showLightbox(_lightboxIdx + delta); // wraps around
 }
 
 function closeLightbox() {
@@ -3888,6 +4874,14 @@ function closeLightbox() {
   overlay.style.display = 'none';
   img.src = '';
 }
+
+// Arrow-key navigation while the lightbox is open
+document.addEventListener('keydown', e => {
+  if(document.getElementById('lightboxOverlay').style.display !== 'flex') return;
+  if(e.key === 'ArrowLeft'){ e.preventDefault(); lightboxStep(-1); }
+  else if(e.key === 'ArrowRight'){ e.preventDefault(); lightboxStep(1); }
+  else if(e.key === 'Escape'){ closeLightbox(); }
+});
 </script>
 </body>
 </html>
@@ -3896,6 +4890,57 @@ function closeLightbox() {
 # ──────────────────────────────────────────────────────────────────────────────
 # Server logic
 # ──────────────────────────────────────────────────────────────────────────────
+
+# ── Filename validation ──────────────────────────────────────────────────────
+
+FORBIDDEN_CHARS = set('\\/:*?"<>|')
+
+
+def validate_filename(name: str, max_length: int) -> str | None:
+    """Return error message or None if valid."""
+    if not name or not name.strip():
+        return "Nazwa nie może być pusta"
+    if len(name) > max_length:
+        return f"Nazwa nie może przekraczać {max_length} znaków"
+    if any(c in FORBIDDEN_CHARS for c in name):
+        return "Nazwa zawiera niedozwolone znaki"
+    return None
+
+
+# ── Segment merging ───────────────────────────────────────────────────────────
+
+
+def merge_segments(fragments: list[list[dict]]) -> list[dict]:
+    """Merge multiple fragment segment lists into one with recalculated timestamps.
+
+    fragments: list of segment arrays, already sorted by source filename.
+    Returns: single merged segments array with contiguous timestamps.
+    """
+    merged = []
+    offset = 0.0
+
+    for fragment_segments in fragments:
+        for seg in fragment_segments:
+            new_seg = {**seg}
+            new_seg["start"] = seg["start"] + offset
+            new_seg["end"] = seg["end"] + offset
+            if "words" in seg and seg["words"]:
+                new_seg["words"] = []
+                for w in seg["words"]:
+                    new_w = {**w}
+                    if w.get("start") is not None:
+                        new_w["start"] = w["start"] + offset
+                    if w.get("end") is not None:
+                        new_w["end"] = w["end"] + offset
+                    new_seg["words"].append(new_w)
+            merged.append(new_seg)
+
+        # Offset for next fragment = end time of last segment in this fragment
+        if fragment_segments:
+            offset = merged[-1]["end"]
+
+    return merged
+
 
 # ── Transcription job tracking & FIFO queue ──────────────────────────────────
 import collections
@@ -4127,11 +5172,60 @@ def _run_transcription_job(
 
         rc = process.poll()
         if rc != 0:
-            # Provide last few lines of output for debugging
-            tail = output_log[-6:] if output_log else []
-            tail_str = ' | '.join(tail) if tail else 'brak szczegółów'
-            update(0, f"Błąd (kod: {rc}) — {tail_str}", "error")
-            return
+            # Check if it's an OOM error — retry with smaller model or CPU
+            full_log = '\n'.join(output_log)
+            if 'out of memory' in full_log.lower() and device == 'cuda':
+                # Try with smaller model first
+                fallback_model = 'small' if model != 'small' else model
+                output_log.append(f"[AUTO-RETRY] CUDA OOM detected, retrying with model={fallback_model}, batch_size=1...")
+                update(15, f"GPU brak pamięci — ponowna próba z modelem {fallback_model}...")
+                # Rebuild command with smaller model and batch
+                cmd_retry = [
+                    python_exe, transcribe_script,
+                    "-i", final_audio,
+                    "-m", fallback_model,
+                    "--device", device,
+                    "--compute-type", compute_type,
+                    "--batch-size", "1",
+                ]
+                if min_speakers is not None:
+                    cmd_retry.extend(["--min-speakers", str(min_speakers)])
+                if max_speakers is not None:
+                    cmd_retry.extend(["--max-speakers", str(max_speakers)])
+                if use_ollama:
+                    cmd_retry.append("--use-ollama")
+                if language:
+                    cmd_retry.extend(["--language", language])
+
+                process2 = subprocess.Popen(
+                    cmd_retry, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
+                while True:
+                    line = process2.stdout.readline()
+                    if line == "" and process2.poll() is not None:
+                        break
+                    if line:
+                        line_stripped = line.strip()
+                        clean = re.sub(r"\033\[[0-9;]*m", "", line_stripped)
+                        output_log.append(clean)
+                        for keyword, pct in progress_map.items():
+                            if keyword in line_stripped:
+                                update(pct, clean)
+                                break
+
+                rc = process2.poll()
+                if rc == 0:
+                    pass  # fall through to success check below
+                else:
+                    tail = output_log[-6:] if output_log else []
+                    tail_str = ' | '.join(tail) if tail else 'brak szczegółów'
+                    update(0, f"Błąd (kod: {rc}) — {tail_str}", "error")
+                    return
+            else:
+                tail = output_log[-6:] if output_log else []
+                tail_str = ' | '.join(tail) if tail else 'brak szczegółów'
+                update(0, f"Błąd (kod: {rc}) — {tail_str}", "error")
+                return
 
         # Success
         json_file = f"{base_name}.json"
@@ -4295,6 +5389,8 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._delete_transcript(name)
         elif path == "/api/delete-all":
             self._delete_all_transcripts()
+        elif path == "/api/merge":
+            self._merge_transcripts()
         elif path == "/api/generate-posts":
             self._generate_posts()
         elif path == "/api/save-posts":
@@ -4313,10 +5409,14 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
             self._upload_and_transcribe()
         elif path == "/api/transcribe-youtube":
             self._transcribe_youtube()
+        elif path == "/api/transcribe-merge":
+            self._transcribe_merge()
         elif path == "/api/find-speaker":
             self._find_speaker()
         elif path == "/api/queue/cancel":
             self._cancel_queue_job()
+        elif path == "/api/rename":
+            self._rename_transcript()
         elif path == "/api/transcribe-youtube":
             self._transcribe_youtube()
         elif path == "/api/find-speaker":
@@ -4519,6 +5619,94 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    # ── API: Merge transcripts ─────────────────────────────────────
+    def _merge_transcripts(self):
+        cls = self.__class__
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            self._json_error(400, "Nieprawidłowe dane JSON")
+            return
+
+        files = params.get("files")
+        output_name = params.get("output_name", "")
+
+        # Validate output_name
+        err = validate_filename(output_name, 200)
+        if err:
+            self._json_error(400, err)
+            return
+
+        # Validate files list
+        if not isinstance(files, list) or not (2 <= len(files) <= 20):
+            self._json_error(400, "Wymagane od 2 do 20 plików")
+            return
+
+        # Validate each file exists
+        for f in files:
+            if not isinstance(f, str):
+                self._json_error(400, "Nieprawidłowa nazwa pliku na liście")
+                return
+            fpath = os.path.join(cls.transcript_dir, f)
+            if not os.path.isfile(fpath):
+                self._json_error(400, f"Plik nie istnieje: {f}")
+                return
+
+        # Sort alphabetically
+        sorted_files = sorted(files)
+
+        # Load segments from each file
+        fragments = []
+        try:
+            for f in sorted_files:
+                fpath = os.path.join(cls.transcript_dir, f)
+                with open(fpath, "r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                fragments.append(data.get("segments", []))
+        except Exception as e:
+            self._json_error(500, f"Błąd odczytu pliku: {e}")
+            return
+
+        # Merge segments
+        merged = merge_segments(fragments)
+
+        # Write merged output
+        output_filename = f"{output_name}.json"
+        output_path = os.path.join(cls.transcript_dir, output_filename)
+        try:
+            with open(output_path, "w", encoding="utf-8") as fp:
+                json.dump({"segments": merged}, fp, ensure_ascii=False)
+        except Exception as e:
+            # Clean up partial output
+            try:
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+            except OSError:
+                pass
+            self._json_error(500, f"Błąd zapisu pliku wynikowego: {e}")
+            return
+
+        # Success — delete source .json and associated audio files
+        for f in sorted_files:
+            base = os.path.splitext(f)[0]
+            # Delete the JSON transcript
+            try:
+                os.remove(os.path.join(cls.transcript_dir, f))
+            except OSError:
+                pass
+            # Delete associated audio files (.mp3, .mp4)
+            for ext in (".mp3", ".mp4"):
+                audio_path = os.path.join(cls.transcript_dir, base + ext)
+                try:
+                    if os.path.isfile(audio_path):
+                        os.remove(audio_path)
+                except OSError:
+                    pass
+
+        self._json_ok({"status": "ok", "name": output_filename})
+
     # ── API: Delete transcript and associated files ─────────────────
     def _delete_transcript(self, name):
         cls = self.__class__
@@ -4599,6 +5787,71 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    # ── API: Rename transcript and associated files ──────────────────
+    def _rename_transcript(self):
+        cls = self.__class__
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+        try:
+            params = json.loads(body)
+        except Exception:
+            self._json_error(400, "Nieprawidłowy JSON.")
+            return
+
+        old_name = params.get("old_name", "")
+        new_name = params.get("new_name", "")
+
+        # Strip .json extension if provided
+        if old_name.endswith(".json"):
+            old_name = old_name[:-5]
+        if new_name.endswith(".json"):
+            new_name = new_name[:-5]
+
+        # Validate new_name
+        err = validate_filename(new_name, 100)
+        if err:
+            self._json_error(400, err)
+            return
+
+        # Check target doesn't already exist
+        new_json_path = os.path.join(cls.transcript_dir, new_name + ".json")
+        if os.path.exists(new_json_path):
+            self._json_error(409, f"Plik '{new_name}.json' już istnieje.")
+            return
+
+        # Suffixes of associated files to rename
+        suffixes = [".json", ".mp3", ".mp4", "_posty.json", "_state.json", "_summary.json", "_posts.json"]
+
+        # Find which files actually exist
+        to_rename = []  # list of (old_path, new_path)
+        for suffix in suffixes:
+            old_path = os.path.join(cls.transcript_dir, old_name + suffix)
+            if os.path.isfile(old_path):
+                new_path = os.path.join(cls.transcript_dir, new_name + suffix)
+                to_rename.append((old_path, new_path))
+
+        if not to_rename:
+            self._json_error(404, f"Nie znaleziono plików dla '{old_name}'.")
+            return
+
+        # Rename with rollback on partial failure
+        renamed = []  # successfully renamed (old_path, new_path)
+        try:
+            for old_path, new_path in to_rename:
+                os.rename(old_path, new_path)
+                renamed.append((old_path, new_path))
+        except OSError as e:
+            # Rollback all already-renamed files
+            for done_old, done_new in reversed(renamed):
+                try:
+                    os.rename(done_new, done_old)
+                except OSError:
+                    pass
+            self._json_error(500, f"Błąd podczas zmiany nazwy: {e}")
+            return
+
+        self._json_ok({"status": "ok", "new_name": new_name + ".json"})
+
     # ── API: Save post feedback (good/bad examples for learning) ───
     def _save_post_feedback(self):
         content_length = int(self.headers.get("Content-Length", 0))
@@ -4648,19 +5901,19 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         if not youtube_url:
             self._json_error(400, "Wymagany parametr: youtube_url")
             return
+        youtube_url = _clean_youtube_url(youtube_url)
 
-        # Validate URL
+        # Validate URL — accept any http/https URL (yt-dlp supports many sites)
         try:
             parsed = urllib.parse.urlparse(youtube_url)
-            host = parsed.netloc.lower().lstrip("www.")
-            if host not in ("youtube.com", "youtu.be") or parsed.scheme not in ("http", "https"):
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
                 raise ValueError()
         except Exception:
-            self._json_error(400, "Nieprawidłowy URL YouTube. Obsługiwane: youtube.com, youtu.be")
+            self._json_error(400, "Nieprawidłowy URL. Wymagany http:// lub https://")
             return
 
         # Check yt-dlp availability
-        if not shutil_mod.which("yt-dlp"):
+        if not _find_yt_dlp():
             self._json_error(503, "yt-dlp nie jest dostępny. Zainstaluj: pip install yt-dlp")
             return
 
@@ -4687,7 +5940,7 @@ class TranscriptHandler(http.server.BaseHTTPRequestHandler):
         print(f"\033[94m[YT] Pobieranie audio: {youtube_url} → {dest_path}\033[0m")
         try:
             result = subprocess.run(
-                ["yt-dlp", "-x", "--audio-format", "mp3", "-o", dest_path, youtube_url],
+                [_find_yt_dlp(), "--js-runtimes", "node", "--remote-components", "ejs:github", "-x", "--audio-format", "mp3", *_yt_dlp_cookies_args(youtube_url), "-o", dest_path, youtube_url],
                 capture_output=True, text=True, timeout=300
             )
             if result.returncode != 0:
@@ -5277,6 +6530,229 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
         except OSError as e:
             self._json_error(500, f"Błąd zapisu pliku postów: {e}")
 
+    # ── API: Transcribe-merge (multi-source concatenation) ─────────
+    def _transcribe_merge(self):
+        content_type = self.headers.get("Content-Type", "")
+
+        if "multipart/form-data" not in content_type:
+            self._json_error(400, "Wymagany Content-Type: multipart/form-data")
+            return
+
+        # Parse boundary
+        boundary = None
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[9:].strip('"')
+                break
+        if not boundary:
+            self._json_error(400, "Brak boundary w Content-Type")
+            return
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        # Parse multipart form data
+        boundary_bytes = boundary.encode()
+        parts = body.split(b"--" + boundary_bytes)
+
+        params_raw = None
+        uploaded_files = []  # list of (filename, data)
+
+        for part in parts:
+            if b"Content-Disposition" not in part:
+                continue
+            header_end = part.find(b"\r\n\r\n")
+            if header_end == -1:
+                continue
+            headers_raw = part[:header_end].decode("utf-8", errors="replace")
+            content = part[header_end + 4:]
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+
+            # Parse Content-Disposition
+            name = None
+            filename = None
+            for line in headers_raw.split("\r\n"):
+                if "Content-Disposition" in line:
+                    for item in line.split(";"):
+                        item = item.strip()
+                        if item.startswith("name="):
+                            name = item[5:].strip('"')
+                        elif item.startswith("filename="):
+                            filename = item[9:].strip('"')
+
+            if name == "params":
+                params_raw = content.decode("utf-8", errors="replace").strip()
+            elif name and name.startswith("file_") and filename:
+                uploaded_files.append((filename, content))
+
+        # Parse params JSON
+        youtube_urls = []
+        model = "medium"
+        device = "cuda"
+        compute_type = "float16"
+        batch_size = 4
+        min_speakers = None
+        max_speakers = None
+        use_ollama = True
+        language = "pl"
+
+        if params_raw:
+            try:
+                params = json.loads(params_raw)
+                youtube_urls = [u for u in params.get("youtube_urls", []) if u and u.strip()]
+                model = params.get("model", model)
+                device = params.get("device", device)
+                compute_type = params.get("compute_type", compute_type)
+                if params.get("batch_size") is not None:
+                    try:
+                        batch_size = int(params["batch_size"])
+                    except (ValueError, TypeError):
+                        pass
+                min_speakers = params.get("min_speakers")
+                max_speakers = params.get("max_speakers")
+                if params.get("use_ollama") is not None:
+                    use_ollama = bool(params["use_ollama"])
+                lang_val = params.get("language")
+                if lang_val:
+                    language = lang_val
+            except json.JSONDecodeError:
+                self._json_error(400, "Nieprawidłowy JSON w polu params")
+                return
+
+        # Validate at least one source exists
+        if not youtube_urls and not uploaded_files:
+            self._json_error(400, "Wymagany co najmniej jeden plik lub link YouTube")
+            return
+
+        # Check yt-dlp availability if YouTube URLs present
+        if youtube_urls and not _find_yt_dlp():
+            self._json_error(503, "yt-dlp nie jest dostępny. Zainstaluj: pip install yt-dlp")
+            return
+
+        cls = self.__class__
+        tmp_dir = tempfile.mkdtemp(prefix="merge_")
+        try:
+            downloaded_files = []
+            saved_uploads = []
+
+            # Download YouTube URLs via yt-dlp
+            for i, url in enumerate(youtube_urls):
+                url = _clean_youtube_url(url)
+                dest = os.path.join(tmp_dir, f"yt_{i}.%(title)s.mp4")
+                # Use YouTube-specific format for YT, generic for other sites
+                _host = urllib.parse.urlparse(url).netloc.lower().replace("www.", "")
+                if _host in ("youtube.com", "youtu.be"):
+                    _fmt = "best[height<=1080][acodec!=none][vcodec!=none]/bestvideo[height<=1080]+bestaudio/18/best"
+                else:
+                    _fmt = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+                try:
+                    result = subprocess.run(
+                        [
+                            _find_yt_dlp(), "--js-runtimes", "node", "--remote-components", "ejs:github",
+                            "-f", _fmt,
+                            "--merge-output-format", "mp4",
+                            "--restrict-filenames",
+                            *_yt_dlp_cookies_args(url),
+                            "-o", dest, url,
+                        ],
+                        capture_output=True, text=True, timeout=600,
+                    )
+                    if result.returncode != 0:
+                        self._json_error(502, f"Błąd pobierania: {url} — {result.stderr[:200]}")
+                        return
+                except subprocess.TimeoutExpired:
+                    self._json_error(502, f"yt-dlp timeout (600s): {url}")
+                    return
+                # yt-dlp expands %(title)s — find the actual file
+                actual = [f for f in os.listdir(tmp_dir) if f.startswith(f"yt_{i}.")]
+                if actual:
+                    dl_path = os.path.join(tmp_dir, actual[0])
+                else:
+                    dl_path = dest  # fallback
+                # Convert VFR → CFR
+                try:
+                    _convert_to_cfr(dl_path)
+                except Exception:
+                    pass  # keep VFR if conversion fails
+                downloaded_files.append(dl_path)
+
+            # Save uploaded files preserving extension
+            for i, (filename, data) in enumerate(uploaded_files):
+                ext = os.path.splitext(filename)[1] or ".mp4"
+                dest = os.path.join(tmp_dir, f"upload_{i}{ext}")
+                with open(dest, "wb") as f:
+                    f.write(data)
+                saved_uploads.append(dest)
+
+            # Build input.txt for ffmpeg concat demuxer (URLs first, then files)
+            all_sources = downloaded_files + saved_uploads
+            input_txt_path = os.path.join(tmp_dir, "input.txt")
+            build_concat_input(all_sources, input_txt_path)
+
+            # Run ffmpeg concat
+            merged_path = os.path.join(tmp_dir, "merged.mp4")
+            result = subprocess.run(
+                ["ffmpeg", "-f", "concat", "-safe", "0", "-i", input_txt_path, "-c", "copy", merged_path],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode != 0:
+                self._json_error(500, f"Błąd łączenia plików: {result.stderr[:200]}")
+                return
+
+            # Derive name from first source
+            first_source = all_sources[0]
+            merge_name = os.path.splitext(os.path.basename(first_source))[0]
+            # Remove yt_N. prefix if present (from temp naming)
+            merge_name = re.sub(r'^yt_\d+\.', '', merge_name)
+            if not merge_name:
+                merge_name = f"merge_{int(time.time())}"
+            # Avoid collision with existing files
+            final_path = os.path.join(cls.transcript_dir, f"{merge_name}.mp4")
+            if os.path.exists(final_path):
+                merge_name = f"{merge_name}_{int(time.time())}"
+                final_path = os.path.join(cls.transcript_dir, f"{merge_name}.mp4")
+            _shutil_top.move(merged_path, final_path)
+
+            # Queue transcription job
+            job_id = f"job_{int(time.time() * 1000)}"
+            with _job_lock:
+                _transcription_jobs[job_id] = {
+                    "status": "queued",
+                    "progress": 0,
+                    "message": "Pliki połączone, czeka w kolejce...",
+                    "result": None,
+                    "name": merge_name,
+                    "queued_at": time.time(),
+                    "started_at": None,
+                    "ended_at": None,
+                    "log": [],
+                    "_args": (
+                        final_path,
+                        cls.transcript_dir,
+                        model,
+                        device,
+                        compute_type,
+                        batch_size,
+                        min_speakers,
+                        max_speakers,
+                        use_ollama,
+                        language,
+                    ),
+                }
+                _job_queue.append(job_id)
+            _ensure_queue_worker()
+
+            payload = json.dumps({"job_id": job_id}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        finally:
+            _shutil_top.rmtree(tmp_dir, ignore_errors=True)
+
     # ── Helper: JSON error response ────────────────────────────────
     def _json_error(self, code, message):
         payload = json.dumps({"error": message}).encode("utf-8")
@@ -5526,32 +7002,25 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
     # ── YouTube URL helpers ────────────────────────────────────────
     @staticmethod
     def _is_valid_youtube_url(url: str) -> bool:
-        """Returns True if url points to youtube.com or youtu.be domain."""
+        """Returns True if url is a valid http/https URL (yt-dlp supports many sites)."""
         try:
             parsed = urllib.parse.urlparse(url)
-            host = parsed.netloc.lower()
-            if host.startswith("www."):
-                host = host[4:]
-            return host in ("youtube.com", "youtu.be") and parsed.scheme in (
-                "http",
-                "https",
-            )
+            return parsed.scheme in ("http", "https") and bool(parsed.netloc)
         except Exception:
             return False
 
     @staticmethod
     def _extract_youtube_video_id(url: str) -> str:
         """
-        Extracts the video ID from YouTube URL.
-        Sanitizes by removing chars outside [A-Za-z0-9_-], truncates to 11 chars.
-        Falls back to sanitized URL path fragment.
+        Extracts a short identifier from a URL for use as filename.
+        For YouTube: video ID (11 chars). For other sites: sanitized path slug.
         """
         parsed = urllib.parse.urlparse(url)
         video_id = None
 
         if "youtu.be" in parsed.netloc:
             video_id = parsed.path.lstrip("/").split("/")[0]
-        else:
+        elif "youtube.com" in parsed.netloc:
             qs = urllib.parse.parse_qs(parsed.query)
             if "v" in qs:
                 video_id = qs["v"][0]
@@ -5560,10 +7029,14 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
                 if len(parts) >= 2 and parts[-2] in ("shorts", "embed"):
                     video_id = parts[-1]
 
-        if not video_id:
-            video_id = re.sub(r"[^\w\-]", "_", parsed.path)[:40]
+        if video_id:
+            return re.sub(r"[^A-Za-z0-9_\-]", "", video_id)[:11]
 
-        return re.sub(r"[^A-Za-z0-9_\-]", "", video_id)[:11]
+        # Non-YouTube: use last meaningful path segment
+        parts = [p for p in parsed.path.split("/") if p]
+        slug = parts[-1] if parts else parsed.netloc
+        slug = re.sub(r"[^\w\-]", "_", slug)
+        return slug[:60] or "video"
 
     # ── API: Transcribe from YouTube URL ─────────────────────────────
     def _transcribe_youtube(self):
@@ -5586,15 +7059,16 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
         if not youtube_url:
             self._json_error(400, "Brak parametru youtube_url.")
             return
+        youtube_url = _clean_youtube_url(youtube_url)
 
         if not self._is_valid_youtube_url(youtube_url):
             self._json_error(
                 400,
-                "Nieprawidłowy URL YouTube. Dozwolone domeny: youtube.com, youtu.be.",
+                "Nieprawidłowy URL. Wymagany http:// lub https://",
             )
             return
 
-        if not _shutil.which("yt-dlp"):
+        if not _find_yt_dlp():
             self._json_error(
                 503,
                 "yt-dlp nie jest zainstalowany lub niedostępny w PATH. Zainstaluj: pip install yt-dlp",
@@ -5610,30 +7084,42 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
         max_speakers = params.get("max_speakers") or None
         use_ollama = bool(params.get("use_ollama", True))
 
-        # yt-dlp output template: video_id.%(ext)s  → results in video_id.mp3
-        dest_template = os.path.join(cls.transcript_dir, f"{video_id}.%(ext)s")
+        # yt-dlp output template: title-based naming (yt-dlp sanitizes the title)
+        dest_template = os.path.join(cls.transcript_dir, "%(title)s.%(ext)s")
 
-        print(f"\033[94m[-] Pobieranie audio z YouTube: {youtube_url}\033[0m")
+        # Use YouTube-specific format for YT, generic for other sites
+        parsed_host = urllib.parse.urlparse(youtube_url).netloc.lower().replace("www.", "")
+        if parsed_host in ("youtube.com", "youtu.be"):
+            # Prefer combined HLS <=1080p (web_safari), then separate streams,
+            # then format 18 (360p) which always works as last resort.
+            fmt_arg = "best[height<=1080][acodec!=none][vcodec!=none]/bestvideo[height<=1080]+bestaudio/18/best"
+        else:
+            fmt_arg = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+
+        print(f"\033[94m[-] Pobieranie wideo: {youtube_url}\033[0m")
+        _yt_dlp_bin = _find_yt_dlp()
         try:
-            result = subprocess.run(
-                [
-                    "yt-dlp",
-                    "-x",
-                    "--audio-format",
-                    "mp3",
-                    "-o",
-                    dest_template,
-                    youtube_url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
+            cmd = [
+                _yt_dlp_bin,
+                "--js-runtimes", "node", "--remote-components", "ejs:github",
+                "-f", fmt_arg,
+                "--merge-output-format", "mp4",
+                "--restrict-filenames",
+                *_yt_dlp_cookies_args(youtube_url),
+                "-o", dest_template,
+                youtube_url,
+            ]
+            print(f"\033[90m[yt-dlp cmd] {' '.join(cmd)}\033[0m")
+            import sys as _sys; _sys.stdout.flush()
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            print(f"\033[90m[yt-dlp exit={result.returncode}] stdout={result.stdout[-300:] if result.stdout else ''}\033[0m")
+            print(f"\033[90m[yt-dlp stderr] {result.stderr[-500:] if result.stderr else ''}\033[0m")
+            _sys.stdout.flush()
         except FileNotFoundError:
             self._json_error(503, "yt-dlp nie jest dostępny w PATH.")
             return
         except subprocess.TimeoutExpired:
-            self._json_error(502, "yt-dlp przekroczył limit czasu (300s).")
+            self._json_error(502, "yt-dlp przekroczył limit czasu (600s).")
             return
         except Exception as e:
             self._json_error(500, f"Błąd podczas uruchamiania yt-dlp: {str(e)}")
@@ -5647,8 +7133,42 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
             )
             return
 
-        actual_path = os.path.join(cls.transcript_dir, f"{video_id}.mp3")
-        print(f"\033[92m[+] Pobrano audio: {actual_path}\033[0m")
+        # Find the downloaded .mp4 file (glob needed since yt-dlp sanitizes the title)
+        import glob as _glob
+        mp4_files = sorted(
+            _glob.glob(os.path.join(cls.transcript_dir, "*.mp4")),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        if not mp4_files:
+            self._json_error(500, "Nie znaleziono pobranego pliku MP4.")
+            return
+        actual_path = mp4_files[0]
+        print(f"\033[92m[+] Pobrano wideo: {actual_path}\033[0m")
+
+        # Convert VFR → CFR for NLE compatibility (Kdenlive etc.)
+        try:
+            print(f"\033[94m[~] Konwersja do CFR (30fps): {actual_path}\033[0m")
+            _convert_to_cfr(actual_path)
+            print(f"\033[92m[+] CFR OK\033[0m")
+        except Exception as e:
+            print(f"\033[93m[!] CFR conversion failed, keeping VFR: {e}\033[0m")
+
+        # Validate audio stream exists via ffprobe
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-select_streams", "a",
+                 "-show_entries", "stream=codec_type", "-of", "csv=p=0", actual_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            if not probe.stdout.strip():
+                os.remove(actual_path)
+                self._json_error(500, "Pobrany plik MP4 nie zawiera ścieżki audio.")
+                return
+        except Exception as e:
+            os.remove(actual_path)
+            self._json_error(500, f"Nie można zweryfikować ścieżki audio (ffprobe): {e}")
+            return
 
         job_id = f"job_{int(time.time() * 1000)}"
         with _job_lock:
@@ -6191,7 +7711,10 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
                     chunk = f.read(min(65536, remaining))
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    try:
+                        self.wfile.write(chunk)
+                    except (ConnectionResetError, BrokenPipeError):
+                        return
                     remaining -= len(chunk)
         else:
             self.send_response(200)
@@ -6205,7 +7728,10 @@ Jeśli nie znajdziesz imienia lub wariantu fonetycznego: {{"found": false, "spea
                     chunk = f.read(65536)
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    try:
+                        self.wfile.write(chunk)
+                    except (ConnectionResetError, BrokenPipeError):
+                        return
 
 
 class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

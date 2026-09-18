@@ -49,3 +49,9 @@ x_monitor/data/
 # Selenium profile przeglądarki
 .selenium-brave/
 .selenium-profile/
+
+# YouTube cookies (exported from browser, contains session data)
+cookies.txt
+
+# Temp files for agent/debugging
+.tmp/
